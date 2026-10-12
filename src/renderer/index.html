@@ -334,6 +334,12 @@
         color: var(--purple-100);
         margin-bottom: 4px;
       }
+      .field-hint {
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.55);
+        margin-top: 6px;
+        line-height: 1.4;
+      }
       .slider-row {
         display: flex;
         align-items: center;
@@ -634,6 +640,16 @@
 
       <div id="sidebar">
         <div class="sidebar-section">
+          <div class="sidebar-row">
+            <label class="field-label" for="engine-select">認識エンジン</label>
+            <select id="engine-select">
+              <option value="audiveris">Audiveris(既定)</option>
+              <option value="homr">homr(実験的・低速)</option>
+            </select>
+            <div id="engine-hint" class="field-hint" hidden>
+              homrは実験的なエンジンです。元のPDFへの重ね表示はできず(再描画表示になります)、1ページあたり数分〜十数分かかることがあります。
+            </div>
+          </div>
           <div class="sidebar-row button-row">
             <button id="open-button">楽譜PDFを開く</button>
             <select id="history-select"><option value="">履歴(選択してください)</option></select>
