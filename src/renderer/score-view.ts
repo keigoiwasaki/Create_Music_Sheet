@@ -1,7 +1,7 @@
 import { OpenSheetMusicDisplay, TransposeCalculator } from 'opensheetmusicdisplay'
-import type { GraphicalVoiceEntry } from 'opensheetmusicdisplay'
+import type { GraphicalMeasure, GraphicalVoiceEntry } from 'opensheetmusicdisplay'
 import { pitchToSolfege } from './solfege'
-import { parseMusicXmlEvents, type ChordEvent } from './musicxml-notes'
+import { getTempoBpm } from './musicxml-notes'
 import {
   buildHighlightEntries,
   LABEL_NOTE_GAP,
@@ -26,9 +26,13 @@ export class ScoreView {
   private readonly osmd: OpenSheetMusicDisplay
   private readonly labelLayer: HTMLElement
   private readonly container: HTMLElement
-  private events: ChordEvent[] = []
   private highlightEntries: HighlightEntry[] = []
   private placements: PlacedLabel[] = []
+  /** Seconds per whole note (4 beats at the piece's tempo) — the single conversion factor from
+   * OSMD's own Fraction-based (whole-note-unit) timestamps into the real seconds audio playback
+   * uses, read from the same `<sound tempo>` detection `musicxml-notes.ts` uses for playback, so
+   * the two can never drift apart even if OSMD's own internal tempo detection differs. */
+  private secondsPerWholeNote = (60 / 120) * 4
 
   /**
    * `pageFormat`, e.g. "A4_P", splits rendering into fixed-size pages (for print/PDF export)
@@ -60,8 +64,10 @@ export class ScoreView {
     const source = typeof content === 'string' ? content : new Blob([content as unknown as BlobPart])
     await this.osmd.load(source)
     this.osmd.render()
-    // Playback timing is only derivable when we have the raw MusicXML text ourselves to re-parse.
-    this.events = typeof content === 'string' ? parseMusicXmlEvents(content) : []
+    if (typeof content === 'string') {
+      const tempo = getTempoBpm(content)
+      this.secondsPerWholeNote = (60 / tempo) * 4
+    }
     this.renderLabels()
   }
 
@@ -93,17 +99,12 @@ export class ScoreView {
     const measureRows = this.osmd.GraphicSheet.MeasureList
 
     const candidates: LabelCandidate[] = []
-    let eventIndex = 0
     for (const row of measureRows) {
       for (const measure of row) {
         for (const staffEntry of measure.staffEntries) {
           staffEntry.graphicalVoiceEntries.forEach((voiceEntry, voiceIndex) => {
-            const event = this.events[eventIndex]
-            const candidate = this.buildLabelCandidate(voiceEntry, voiceIndex, containerRect, event)
-            if (candidate) {
-              candidates.push(candidate)
-              eventIndex++
-            }
+            const candidate = this.buildLabelCandidate(voiceEntry, voiceIndex, containerRect, measure)
+            if (candidate) candidates.push(candidate)
           })
         }
       }
@@ -112,6 +113,33 @@ export class ScoreView {
     const { placements, elements } = placeLabelsAvoidingOverlap(candidates, this.labelLayer)
     this.placements = placements
     this.highlightEntries = buildHighlightEntries(placements, elements)
+  }
+
+  /**
+   * Timing read straight from OSMD's own parsed structure (measure's absolute position + this
+   * voice entry's position within it, both as Fractions in whole-note units), not by matching
+   * against a separately re-parsed event list by array index. That sequential-index approach broke
+   * the moment OSMD's own internal note-traversal order (strictly chronological across staves —
+   * see below) diverged from `musicxml-notes.ts`'s own emission order (per-staff within a measure,
+   * matching the source MusicXML document order, which is NOT chronological when a measure has
+   * multiple staves interleaved via `<backup>`/`<forward>`) — producing correct ドレミ text (read
+   * independently from OSMD's own note data, see `buildLabelCandidate` below) sitting on a note
+   * whose highlight timing actually belonged to a different note. Reading time/duration directly
+   * from the same graphical object the label is being placed on makes this category of mismatch
+   * structurally impossible, for any future piece or OMR engine, not just this one case.
+   */
+  private computeTiming(voiceEntry: GraphicalVoiceEntry, measure: GraphicalMeasure): { time: number; duration: number } | null {
+    const sourceMeasure = measure.parentSourceMeasure
+    if (!sourceMeasure) return null
+    const firstPitchedNote = voiceEntry.notes.find((n) => !n.sourceNote.isRest())
+    if (!firstPitchedNote) return null
+
+    const absoluteWholeNotes = sourceMeasure.AbsoluteTimestamp.RealValue + voiceEntry.parentVoiceEntry.Timestamp.RealValue
+    const lengthWholeNotes = firstPitchedNote.sourceNote.Length.RealValue
+    return {
+      time: absoluteWholeNotes * this.secondsPerWholeNote,
+      duration: lengthWholeNotes * this.secondsPerWholeNote,
+    }
   }
 
   private getNoteheadRect(note: unknown): DOMRect | null {
@@ -134,7 +162,7 @@ export class ScoreView {
     voiceEntry: GraphicalVoiceEntry,
     voiceIndex: number,
     containerRect: DOMRect,
-    event: ChordEvent | undefined
+    measure: GraphicalMeasure
   ): LabelCandidate | null {
     const items = voiceEntry.notes
       .filter((note) => !note.sourceNote.isRest() && !!note.sourceNote.Pitch)
@@ -164,6 +192,7 @@ export class ScoreView {
       ? Math.max(...items.map((item) => item.rect.bottom)) - containerRect.top + LABEL_NOTE_GAP
       : Math.min(...items.map((item) => item.rect.top)) - containerRect.top - LABEL_NOTE_GAP
 
-    return { pitches, centerX, placeBelow, anchorY, time: event?.time, duration: event?.duration }
+    const timing = this.computeTiming(voiceEntry, measure)
+    return { pitches, centerX, placeBelow, anchorY, time: timing?.time, duration: timing?.duration }
   }
 }

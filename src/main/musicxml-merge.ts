@@ -44,6 +44,53 @@ function markAsPageStart(doc: Document, measure: Element): void {
   print.setAttribute('new-page', 'yes')
 }
 
+/** MusicXML's own schema order for `<attributes>` children that can precede `<staves>` — used to
+ * find the correct insertion point within whichever block `<staves>` is added to. */
+const PRECEDES_STAVES = new Set(['divisions', 'key', 'time'])
+
+/**
+ * Ensures a part whose notes actually span multiple `<staff>` numbers (a two-hand grand staff)
+ * declares `<staves>N</staves>` in its attributes — OSMD (and other MusicXML readers) need this to
+ * know to render N separate staff systems; without it, a reader has been observed falling back to
+ * ONE staff and cramming the other hand's notes onto it with a huge pile of ledger lines instead.
+ * homr's own output has been found to omit `<staves>` inconsistently (present for some pieces,
+ * absent for others) despite `<staff>` tags on notes being present and correct either way — this
+ * patches that gap rather than trusting the source engine to always include it.
+ *
+ * Critically, this must land in the part's FIRST `<attributes>` block (typically the one holding
+ * just `<divisions>`), not a later block that happens to carry the `<clef>` elements — confirmed by
+ * direct testing: OSMD silently falls back to a single staff when `<staves>` is only present in a
+ * later attributes block, even though that's still schema-valid MusicXML (a measure may legally
+ * split its attributes across several `<attributes>` elements).
+ */
+function ensureStavesDeclared(doc: Document, part: Element): void {
+  const measures = directChildren(part, 'measure')
+  let maxStaff = 1
+  for (const measure of measures) {
+    for (const note of directChildren(measure, 'note')) {
+      const staffText = directChild(note, 'staff')?.textContent
+      const staffNum = staffText ? Number(staffText) : NaN
+      if (Number.isFinite(staffNum)) maxStaff = Math.max(maxStaff, staffNum)
+    }
+  }
+  if (maxStaff <= 1) return // single staff — nothing to declare
+
+  const attributesBlocks = measures.flatMap((m) => directChildren(m, 'attributes'))
+  if (attributesBlocks.some((a) => directChild(a, 'staves'))) return // already declared somewhere
+
+  const target = attributesBlocks[0]
+  if (!target) return
+
+  const stavesEl = doc.createElement('staves')
+  stavesEl.appendChild(doc.createTextNode(String(maxStaff)))
+
+  const insertBefore = Array.from(target.childNodes).find(
+    (n) => n.nodeType === 1 && !PRECEDES_STAVES.has((n as Element).tagName)
+  )
+  if (insertBefore) target.insertBefore(stavesEl, insertBefore)
+  else target.appendChild(stavesEl)
+}
+
 /**
  * Merges per-page MusicXML texts (one OMR engine run per page, for engines with no multi-page/batch
  * mode of their own — e.g. homr, oemer) into a single piece.
@@ -122,6 +169,7 @@ export function mergePageXmlTexts(xmlTexts: string[]): string {
     directChildren(part, 'measure').forEach((measure, i) => {
       measure.setAttribute('number', String(i + 1))
     })
+    ensureStavesDeclared(baseDoc, part)
   }
 
   return new XMLSerializer().serializeToString(baseDoc)

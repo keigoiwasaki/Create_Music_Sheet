@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DOMParser } from '@xmldom/xmldom'
+import type { Element } from '@xmldom/xmldom'
 import { mergePageXmlTexts } from '../src/main/musicxml-merge'
 
 function page(partsXml: string): string {
@@ -83,5 +84,66 @@ describe('mergePageXmlTexts', () => {
     const merged = mergePageXmlTexts([only])
     const doc = new DOMParser().parseFromString(merged, 'application/xml')
     expect(Array.from(doc.getElementsByTagName('measure'))).toHaveLength(2)
+  })
+
+  it('inserts a missing <staves> declaration into the FIRST attributes block, not a later one', () => {
+    // Mirrors a real homr quirk: <staff> tags on notes are correct, and <staves> is present
+    // elsewhere in later measures, but NEVER in measure 1 at all — and when it reconstructs a
+    // single combined block, <divisions> and <key>/<time>/<clef> arrive split across two separate
+    // <attributes> elements (itself schema-valid). Confirmed by directly testing against OSMD:
+    // putting <staves> in the second (clef-bearing) block renders fine as XML but OSMD silently
+    // falls back to one staff anyway — it must land in the FIRST block, alongside <divisions>.
+    const measuresXml = `
+      <measure number="1">
+        <attributes>
+          <divisions>2</divisions>
+        </attributes>
+        <attributes>
+          <key><fifths>0</fifths></key>
+          <time><beats>4</beats><beat-type>4</beat-type></time>
+          <clef number="1"><sign>G</sign><line>2</line></clef>
+          <clef number="2"><sign>F</sign><line>4</line></clef>
+        </attributes>
+        <note><pitch><step>C</step><octave>5</octave></pitch><duration>2</duration><type>quarter</type><staff>1</staff></note>
+        <backup><duration>2</duration></backup>
+        <note><pitch><step>C</step><octave>3</octave></pitch><duration>2</duration><type>quarter</type><staff>2</staff></note>
+      </measure>
+    `
+    const merged = mergePageXmlTexts([page(part('P1', measuresXml))])
+    const doc = new DOMParser().parseFromString(merged, 'application/xml')
+    const attributesBlocks = Array.from(doc.getElementsByTagName('attributes'))
+    expect(attributesBlocks).toHaveLength(2)
+
+    const staves = attributesBlocks[0].getElementsByTagName('staves')
+    expect(staves).toHaveLength(1)
+    expect(staves[0].textContent).toBe('2')
+    expect(attributesBlocks[1].getElementsByTagName('staves')).toHaveLength(0) // not duplicated into the second block
+
+    // must sit right after <divisions> (the only thing preceding it in this block) per schema order
+    const firstBlockChildren = Array.from(attributesBlocks[0].childNodes)
+      .filter((n) => n.nodeType === 1)
+      .map((n) => (n as Element).tagName)
+    expect(firstBlockChildren).toEqual(['divisions', 'staves'])
+  })
+
+  it('does not add <staves> when a part only ever uses staff 1 (or no staff tags at all)', () => {
+    const merged = mergePageXmlTexts([page(part('P1', measure('C')))])
+    const doc = new DOMParser().parseFromString(merged, 'application/xml')
+    expect(doc.getElementsByTagName('staves')).toHaveLength(0)
+  })
+
+  it('leaves an already-correct <staves> declaration untouched', () => {
+    const measuresXml = `
+      <measure number="1">
+        <attributes>
+          <staves>2</staves>
+        </attributes>
+        <note><pitch><step>C</step><octave>5</octave></pitch><duration>1</duration><type>quarter</type><staff>1</staff></note>
+        <note><pitch><step>C</step><octave>3</octave></pitch><duration>1</duration><type>quarter</type><staff>2</staff></note>
+      </measure>
+    `
+    const merged = mergePageXmlTexts([page(part('P1', measuresXml))])
+    const doc = new DOMParser().parseFromString(merged, 'application/xml')
+    expect(doc.getElementsByTagName('staves')).toHaveLength(1)
   })
 })
