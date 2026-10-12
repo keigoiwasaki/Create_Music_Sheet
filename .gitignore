@@ -1,0 +1,8 @@
+node_modules/
+out/
+dist/
+*.log
+.DS_Store
+vendor/audiveris/*
+!vendor/audiveris/README.md
+.claude/settings.local.json

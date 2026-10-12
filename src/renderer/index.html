@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>楽譜ドレミ表示</title>
+    <style>
+      :root {
+        --purple-900: #2e1065;
+        --purple-800: #4c1d95;
+        --purple-700: #5b21b6;
+        --purple-600: #7c3aed;
+        --purple-500: #8b5cf6;
+        --purple-400: #a78bfa;
+        --purple-200: #ddd6fe;
+        --purple-100: #ede9fe;
+        --purple-50: #f6f4ff;
+        /* UI chrome stays purple background + white text; yellow/amber is the one unified accent
+           for interactive state (checkbox/slider accent-color, the press glow). Teal/blue/rose
+           are used only for the colorful decorative note watermarks, never for functional UI. */
+        --accent-amber: #fde047;
+        --accent-teal: #2dd4bf;
+        --accent-blue: #38bdf8;
+        --accent-rose: #fb7185;
+        /* A small hand-drawn cluster of beamed/flagged eighth notes with a flourish trail —
+           used as a watermark in otherwise-empty background areas (never over text/controls). */
+        --music-decor: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMDAgMzAwIj48ZyBmaWxsPSJub25lIiBzdHJva2U9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIj48cGF0aCBkPSJNMjAgMjMwIEMgNzAgMTkwLCA5MCAxNTAsIDcwIDEwMCBDIDYwIDc1LCA4MCA1NSwgMTEwIDYwIi8+PC9nPjxnIGZpbGw9IiNmZmZmZmYiPjxlbGxpcHNlIGN4PSI5MCIgY3k9IjIyMCIgcng9IjE3IiByeT0iMTMiIHRyYW5zZm9ybT0icm90YXRlKC0xOCA5MCAyMjApIi8+PHJlY3QgeD0iMTA0IiB5PSIxMjAiIHdpZHRoPSI1IiBoZWlnaHQ9IjEwMyIgcng9IjIiLz48ZWxsaXBzZSBjeD0iMTY1IiBjeT0iMTk1IiByeD0iMTciIHJ5PSIxMyIgdHJhbnNmb3JtPSJyb3RhdGUoLTE4IDE2NSAxOTUpIi8+PHJlY3QgeD0iMTc5IiB5PSI5NSIgd2lkdGg9IjUiIGhlaWdodD0iMTAzIiByeD0iMiIvPjxwYXRoIGQ9Ik0xMDcgMTIwIEwxODEgOTUgTDE4MSAxMTIgTDEwNyAxMzcgWiIvPjwvZz48ZyBmaWxsPSIjZmZmZmZmIj48ZWxsaXBzZSBjeD0iMjM1IiBjeT0iOTAiIHJ4PSIxNiIgcnk9IjEyIiB0cmFuc2Zvcm09InJvdGF0ZSgtMTggMjM1IDkwKSIvPjxyZWN0IHg9IjI0OCIgeT0iMzUiIHdpZHRoPSI1IiBoZWlnaHQ9IjU4IiByeD0iMiIvPjxwYXRoIGQ9Ik0yNTMgMzUgQyAyNjggNDAsIDI3MiA1MiwgMjYyIDU4IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9nPjwvc3ZnPgo=");
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family: system-ui, -apple-system, 'Hiragino Sans', sans-serif;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ---------- Top bar: app title + always-visible panel toggles (so hiding/showing either
+         side is never a dead end, unlike the old buttons tucked into the thin divider). ---------- */
+      #top-bar {
+        position: relative;
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 10px 18px;
+        background: linear-gradient(90deg, var(--purple-900), var(--purple-700));
+        color: #fff;
+        box-shadow: 0 2px 6px rgba(46, 16, 101, 0.3);
+        overflow: hidden;
+        z-index: 1;
+      }
+      /* Scattered decorative notes (not a tiled/repeating pattern — deliberately irregular
+         position, size, rotation and color per note) instead of one evenly-repeating strip. */
+      #top-bar-decor {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      .music-note-decor {
+        -webkit-mask-image: var(--music-decor);
+        mask-image: var(--music-decor);
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+      #top-bar-decor .music-note-decor {
+        position: absolute;
+        opacity: 0.4;
+      }
+      #top-bar-title {
+        position: relative;
+        font-size: 16px;
+        font-weight: 700;
+        white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      #top-bar-actions {
+        position: relative;
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
+      }
+      .top-bar-button {
+        height: 32px;
+        padding: 0 14px;
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+        color: #fff;
+        background: rgba(255, 255, 255, 0.14);
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        border-radius: 16px;
+        cursor: pointer;
+        transition: background-color 0.15s ease, transform 0.08s ease, box-shadow 0.15s ease;
+      }
+      .top-bar-button:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.26);
+      }
+      .top-bar-button:active:not(:disabled) {
+        transform: translateY(1px);
+        box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.55), 0 0 14px 2px rgba(250, 204, 21, 0.45);
+      }
+      .top-bar-button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .top-bar-button.active {
+        background: var(--purple-500);
+        border-color: rgba(255, 255, 255, 0.5);
+      }
+
+      /* ---------- Overall layout: score on the left, settings + piano view sidebar on the right ---------- */
+      #app-layout {
+        display: flex;
+        align-items: stretch;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      #app-layout.hide-score #score-panel {
+        display: none;
+      }
+      #app-layout.hide-score #sidebar {
+        flex: 1 1 auto;
+        width: auto;
+      }
+      #app-layout.hide-sidebar #sidebar {
+        display: none;
+      }
+      #app-layout.hide-sidebar #score-panel {
+        flex: 1 1 auto;
+      }
+      /* Toggles the ドレミ overlay off entirely — like swapping in a second, unmarked copy of the
+         same sheet music. The notation underneath (PDF raster or re-engraved OSMD) is untouched. */
+      #app-layout.hide-labels .label-layer {
+        display: none;
+      }
+      #score-panel {
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+      /* A slim bar directly above the score itself (rather than the app-wide top bar) for the two
+         actions that only make sense in relation to the sheet music being shown: toggling its
+         ドレミ overlay and downloading it. */
+      #score-toolbar {
+        flex: 0 0 auto;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 8px 18px;
+        background: linear-gradient(90deg, var(--purple-800), var(--purple-700));
+        box-shadow: 0 1px 4px rgba(46, 16, 101, 0.3);
+      }
+      #score-scroll {
+        position: relative;
+        overflow: auto;
+        scroll-behavior: smooth;
+        flex: 1 1 auto;
+        min-height: 0;
+        padding: 28px;
+        background: linear-gradient(180deg, var(--purple-800), var(--purple-900));
+      }
+      /* Decorative note cluster watermark in the empty purple margin around the sheet music —
+         sits behind the page (z-index below .score-wrapper) and never over the notation itself. */
+      #score-scroll::before,
+      #score-scroll::after {
+        content: '';
+        position: absolute;
+        -webkit-mask-image: var(--music-decor);
+        mask-image: var(--music-decor);
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        background-color: currentColor;
+        pointer-events: none;
+        opacity: 0.22;
+        z-index: 0;
+      }
+      #score-scroll::before {
+        width: 220px;
+        height: 220px;
+        right: -30px;
+        bottom: -20px;
+        color: var(--accent-amber);
+      }
+      #score-scroll::after {
+        width: 140px;
+        height: 140px;
+        left: -20px;
+        top: -10px;
+        transform: rotate(150deg);
+        color: var(--accent-teal);
+      }
+      .score-wrapper {
+        position: relative;
+        z-index: 1;
+        width: 100%;
+      }
+      .score-container {
+        background: #fff;
+        cursor: pointer;
+        border-radius: 10px;
+        box-shadow: 0 1px 4px rgba(76, 29, 149, 0.15), 0 8px 24px rgba(76, 29, 149, 0.12);
+      }
+      .label-layer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.5s ease;
+      }
+      .label-layer.labels-ready {
+        opacity: 1;
+      }
+      .solfege-label {
+        position: absolute;
+        transform: translate(-50%, -100%);
+        font-size: 9px;
+        line-height: 11px;
+        font-weight: 600;
+        color: var(--purple-600);
+        white-space: nowrap;
+        text-align: center;
+      }
+      .solfege-label-below {
+        transform: translate(-50%, 0);
+        color: #b3541a;
+      }
+      .solfege-label.playing {
+        outline: 2px solid #f59e0b;
+        outline-offset: 1px;
+        background: rgba(245, 158, 11, 0.28);
+        border-radius: 2px;
+      }
+      .solfege-label.seek-target {
+        outline: 2px dashed #16a34a;
+        outline-offset: 1px;
+        border-radius: 2px;
+      }
+
+      /* ---------- Sidebar ---------- */
+      #sidebar {
+        /* The piano roll is always showing now, and is barely usable narrow — default to half
+           the window so it has real room (still user-resizable via the divider). */
+        flex: 0 0 50%;
+        width: 50%;
+        height: 100%;
+        position: relative;
+        overflow-y: auto;
+        background: linear-gradient(180deg, var(--purple-800), var(--purple-900));
+        color: #fff;
+        box-shadow: -2px 0 8px rgba(46, 16, 101, 0.35);
+        display: flex;
+        flex-direction: column;
+      }
+      /* Decorative note-cluster watermark tucked into genuinely empty strips of the sidebar — the
+         trailing space after a row of short checkboxes that don't stretch to the panel's full
+         width. (A big corner watermark on #sidebar itself turned out to always land behind the
+         history dropdown or the piano-roll panel, since those cover nearly the whole box — this
+         targets space that's actually blank instead.) */
+      .row-decor {
+        flex: 0 0 auto;
+        margin-left: auto;
+        width: 32px;
+        height: 32px;
+        -webkit-mask-image: var(--music-decor);
+        mask-image: var(--music-decor);
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        background-color: currentColor;
+        color: var(--accent-rose);
+        opacity: 0.4;
+        pointer-events: none;
+      }
+      .sidebar-section {
+        padding: 14px 18px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .sidebar-section h2 {
+        margin: 0 0 12px;
+        padding: 6px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        background: rgba(255, 255, 255, 0.12);
+        border-radius: 6px;
+      }
+      .sidebar-row {
+        margin-bottom: 10px;
+      }
+      .sidebar-row:last-child {
+        margin-bottom: 0;
+      }
+      .sidebar-row.button-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+      .sidebar-row.button-row #open-button {
+        flex: 1 1 auto;
+      }
+      .sidebar-row.button-row #history-select {
+        flex: 1 1 140px;
+      }
+      /* Side by side instead of one slider per row — frees up vertical space in the sidebar for
+         the piano-view section (the falling-notes roll is what actually needs the room). */
+      .slider-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 10px 12px;
+      }
+      .field-label {
+        display: block;
+        font-size: 12px;
+        color: var(--purple-100);
+        margin-bottom: 4px;
+      }
+      .slider-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .slider-row .field-label {
+        margin-bottom: 0;
+        flex: 0 0 32px;
+      }
+      .slider-row input[type='range'] {
+        flex: 1 1 auto;
+        width: auto;
+        min-width: 0;
+        accent-color: var(--purple-200);
+      }
+      .slider-row input#speed,
+      .slider-row input#key-shift {
+        accent-color: var(--accent-amber);
+      }
+      .slider-row span {
+        flex: 0 0 auto;
+        font-size: 12px;
+        color: var(--purple-100);
+        min-width: 24px;
+        text-align: right;
+      }
+      .checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+      }
+      .checkbox-row input[type='checkbox'] {
+        accent-color: var(--purple-200);
+      }
+      #mute-right,
+      #mute-left,
+      #roll-show-labels {
+        accent-color: var(--accent-amber);
+      }
+      #sidebar button {
+        height: 34px;
+        padding: 0 14px;
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+        color: #fff;
+        background: var(--purple-600);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background-color 0.15s ease, transform 0.08s ease, box-shadow 0.15s ease;
+      }
+      #sidebar button:hover:not(:disabled) {
+        background: var(--purple-500);
+      }
+      #sidebar button:active:not(:disabled) {
+        transform: translateY(1px);
+        box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.55), 0 0 14px 2px rgba(250, 204, 21, 0.45);
+      }
+      #sidebar button:disabled {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.45);
+        cursor: default;
+      }
+      #history-select,
+      #voice-select {
+        min-width: 0;
+        width: 100%;
+        height: 30px;
+        border: none;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.12);
+        color: #fff;
+        font-size: 13px;
+        padding: 0 8px;
+      }
+      #history-select option,
+      #voice-select option {
+        color: #1f1030;
+      }
+
+      /* ---------- Piano-view section: falling-notes roll, always showing, fills remaining sidebar space ---------- */
+      #piano-view-section {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      #piano-view-body {
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 0;
+        flex-direction: column;
+      }
+      #roll-panel {
+        position: relative;
+        flex: 1 1 auto;
+        min-height: 0;
+        /* Left unconstrained, this stretches to fill the whole sidebar height — on a tall window
+           that reads as an oddly elongated column rather than a keyboard view. */
+        max-height: 60vh;
+        width: 100%;
+        background: #1a1033;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      #roll-canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      /* Video-player-style play/pause button overlaid on the roll — tucked in the top-left
+         corner (the bottom corners sit right over the keyboard) so it never covers the falling
+         notes or keys, and never has to move between the playing and paused states. Pill-shaped
+         (not a fixed circle) since it needs to fit both "▶" and the wider "一時停止" label. */
+      #roll-play-button {
+        position: absolute;
+        top: 14px;
+        left: 14px;
+        min-width: 44px;
+        height: 36px;
+        padding: 0 14px;
+        border-radius: 18px;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1;
+        background: rgba(45, 212, 191, 0.75);
+        border: 2px solid rgba(255, 255, 255, 0.5);
+        color: #fff;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background-color 0.15s ease, box-shadow 0.15s ease;
+      }
+      #roll-play-button:hover:not(:disabled) {
+        background: rgba(45, 212, 191, 0.9);
+      }
+      #roll-play-button:active:not(:disabled) {
+        box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.55), 0 0 14px 3px rgba(250, 204, 21, 0.5);
+      }
+      #roll-play-button:disabled {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.15);
+        color: rgba(255, 255, 255, 0.4);
+        cursor: default;
+      }
+
+      /* ---------- Status ---------- */
+      .sidebar-status {
+        margin-top: auto;
+        padding: 12px 18px;
+        font-size: 12px;
+        color: var(--purple-100);
+        border-top: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      #status.error {
+        color: #fecaca;
+        font-weight: 600;
+      }
+
+      /* ---------- Draggable divider between the score and the sidebar ---------- */
+      #divider {
+        position: relative;
+        flex: 0 0 6px;
+        width: 6px;
+        cursor: col-resize;
+        background: var(--purple-400);
+      }
+      #divider:hover,
+      #divider.dragging {
+        background: var(--purple-200);
+      }
+
+      /* ---------- Password prompt (for a protected PDF) ---------- */
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(20, 8, 46, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+      }
+      .modal-overlay[hidden] {
+        display: none;
+      }
+      .modal-box {
+        width: min(360px, calc(100vw - 32px));
+        padding: 22px;
+        background: linear-gradient(165deg, var(--purple-800), var(--purple-900));
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 12px;
+        box-shadow: 0 12px 40px rgba(20, 8, 46, 0.5);
+        color: #fff;
+      }
+      .modal-title {
+        font-size: 15px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      .modal-message {
+        font-size: 13px;
+        color: var(--purple-100);
+        line-height: 1.5;
+        margin-bottom: 14px;
+      }
+      .modal-input {
+        width: 100%;
+        height: 36px;
+        padding: 0 10px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+        font-size: 14px;
+      }
+      .modal-input:focus {
+        outline: 2px solid var(--accent-amber);
+        outline-offset: 1px;
+      }
+      .modal-error {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #fecaca;
+      }
+      .modal-buttons {
+        margin-top: 18px;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .modal-button-primary,
+      .modal-button-secondary {
+        height: 34px;
+        padding: 0 16px;
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background-color 0.15s ease;
+      }
+      .modal-button-primary {
+        background: var(--purple-600);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: #fff;
+      }
+      .modal-button-primary:hover {
+        background: var(--purple-500);
+      }
+      .modal-button-secondary {
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        color: var(--purple-100);
+      }
+      .modal-button-secondary:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="top-bar">
+      <div id="top-bar-decor" aria-hidden="true">
+        <span class="music-note-decor" style="width: 24px; height: 24px; top: 3px; left: 5%; transform: rotate(-18deg); color: var(--accent-amber)"></span>
+        <span class="music-note-decor" style="width: 34px; height: 34px; top: 13px; left: 14%; transform: rotate(22deg); color: var(--accent-teal)"></span>
+        <span class="music-note-decor" style="width: 18px; height: 18px; top: 1px; left: 24%; transform: rotate(-45deg); color: var(--accent-rose)"></span>
+        <span class="music-note-decor" style="width: 28px; height: 28px; top: 16px; left: 33%; transform: rotate(8deg); color: var(--accent-blue)"></span>
+        <span class="music-note-decor" style="width: 20px; height: 20px; top: 5px; left: 44%; transform: rotate(-30deg); color: var(--accent-amber)"></span>
+        <span class="music-note-decor" style="width: 30px; height: 30px; top: 12px; left: 54%; transform: rotate(50deg); color: var(--accent-teal)"></span>
+        <span class="music-note-decor" style="width: 16px; height: 16px; top: 2px; left: 64%; transform: rotate(-12deg); color: var(--accent-rose)"></span>
+        <span class="music-note-decor" style="width: 26px; height: 26px; top: 15px; left: 72%; transform: rotate(35deg); color: var(--accent-blue)"></span>
+      </div>
+      <div id="top-bar-title">楽譜ドレミ表示</div>
+      <div id="top-bar-actions">
+        <button id="collapse-score-button" type="button" class="top-bar-button">楽譜を隠す</button>
+        <button id="collapse-sidebar-button" type="button" class="top-bar-button">設定を隠す</button>
+      </div>
+    </div>
+
+    <div id="app-layout">
+      <div id="score-panel">
+        <div id="score-toolbar">
+          <button id="toggle-labels-button" type="button" class="top-bar-button" disabled>ドレミを隠す</button>
+          <button id="download-button" type="button" class="top-bar-button" disabled>ダウンロード</button>
+        </div>
+        <div id="score-scroll">
+          <div id="score-wrapper" class="score-wrapper">
+            <div id="score-container" class="score-container"></div>
+            <div id="label-layer" class="label-layer"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="divider" title="ドラッグして幅を調整"></div>
+
+      <div id="sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-row button-row">
+            <button id="open-button">楽譜PDFを開く</button>
+            <select id="history-select"><option value="">履歴(選択してください)</option></select>
+          </div>
+          <div class="sidebar-row button-row">
+            <button id="history-delete-button" disabled title="選択した履歴を削除">削除</button>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-row button-row">
+            <label class="checkbox-row"><input id="mute-right" type="checkbox" /> 右手を消音</label>
+            <label class="checkbox-row"><input id="mute-left" type="checkbox" /> 左手を消音</label>
+            <span class="row-decor" aria-hidden="true"></span>
+          </div>
+          <div class="sidebar-row button-row">
+            <label class="checkbox-row"><input id="roll-show-labels" type="checkbox" checked /> ピアノロールにドレミを表示</label>
+            <span class="row-decor" aria-hidden="true" style="transform: rotate(-150deg); color: var(--accent-amber)"></span>
+          </div>
+          <div class="sidebar-row slider-grid">
+            <div class="slider-row">
+              <label class="field-label" for="speed">速度</label>
+              <input id="speed" type="range" min="0.5" max="2" step="0.25" value="1" />
+              <span id="speed-label">1.0x</span>
+            </div>
+            <div class="slider-row">
+              <label class="field-label" for="key-shift">キー</label>
+              <input id="key-shift" type="range" min="-6" max="6" step="1" value="0" />
+              <span id="key-shift-label">0</span>
+            </div>
+          </div>
+          <div class="sidebar-row">
+            <label class="field-label" for="voice-select">音色</label>
+            <select id="voice-select"></select>
+          </div>
+        </div>
+
+        <div class="sidebar-section" id="piano-view-section">
+          <div id="piano-view-body">
+            <div id="roll-panel">
+              <canvas id="roll-canvas" width="300" height="280"></canvas>
+              <button id="roll-play-button" disabled>▶</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-status"><span id="status"></span></div>
+      </div>
+    </div>
+
+    <div id="password-modal" class="modal-overlay" hidden>
+      <div class="modal-box">
+        <div class="modal-title">パスワードが必要です</div>
+        <div class="modal-message">このPDFはパスワードで保護されています。パスワードを入力してください。</div>
+        <input id="password-input" type="password" class="modal-input" autocomplete="off" />
+        <div id="password-error" class="modal-error" hidden>パスワードが正しくありません。もう一度お試しください。</div>
+        <div class="modal-buttons">
+          <button id="password-cancel-button" type="button" class="modal-button-secondary">キャンセル</button>
+          <button id="password-submit-button" type="button" class="modal-button-primary">開く</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./app.ts"></script>
+  </body>
+</html>

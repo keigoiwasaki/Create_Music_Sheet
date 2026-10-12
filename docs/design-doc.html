@@ -1,0 +1,505 @@
+<!doctype html>
+<title>楽譜ドレミ表示</title>
+<style>
+  :root {
+    --paper: #faf8fc;
+    --paper-raised: #ffffff;
+    --ink: #211c30;
+    --ink-soft: #413a52;
+    --accent: #6d28d9;
+    --accent-soft: #efe9fb;
+    --accent-line: #c9b8ef;
+    --rule: #ddd6e8;
+    --muted: #71687f;
+    --code-bg: #f1edf8;
+    --good: #0f7a5c;
+    --warn: #a35d1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #17131f;
+      --paper-raised: #1e1929;
+      --ink: #ece7f5;
+      --ink-soft: #cabfe0;
+      --accent: #b79cf0;
+      --accent-soft: rgba(183, 156, 240, 0.14);
+      --accent-line: rgba(183, 156, 240, 0.4);
+      --rule: rgba(221, 214, 232, 0.16);
+      --muted: #a79bb8;
+      --code-bg: rgba(183, 156, 240, 0.08);
+      --good: #4fd9a8;
+      --warn: #e0a85e;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #17131f;
+    --paper-raised: #1e1929;
+    --ink: #ece7f5;
+    --ink-soft: #cabfe0;
+    --accent: #b79cf0;
+    --accent-soft: rgba(183, 156, 240, 0.14);
+    --accent-line: rgba(183, 156, 240, 0.4);
+    --rule: rgba(221, 214, 232, 0.16);
+    --muted: #a79bb8;
+    --code-bg: rgba(183, 156, 240, 0.08);
+    --good: #4fd9a8;
+    --warn: #e0a85e;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Noto Sans JP", "Hiragino Sans", sans-serif;
+    font-size: 15.5px;
+    line-height: 1.85;
+    padding: 0 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding-block: 56px 96px;
+  }
+
+  h1, h2, h3 {
+    font-family: "Noto Serif JP", serif;
+    font-weight: 700;
+    color: var(--ink);
+    text-wrap: balance;
+  }
+
+  /* ---------- cover ---------- */
+  .cover { margin-bottom: 64px; }
+  .cover-eyebrow {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .cover h1 {
+    font-size: 34px;
+    line-height: 1.3;
+    margin: 0 0 10px;
+  }
+  .cover .subtitle {
+    font-size: 15px;
+    color: var(--ink-soft);
+    margin-bottom: 28px;
+  }
+  .cover-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 28px;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .cover-meta dt { display: inline; }
+  .cover-meta .pair { display: flex; gap: 8px; }
+  .cover-meta .pair dt::after { content: ":"; }
+  .cover-meta .pair dd { margin: 0; color: var(--ink-soft); }
+
+  /* ---------- staff divider: a subject-specific device, not decoration ---------- */
+  .staff {
+    height: 34px;
+    margin: 56px 0 40px;
+    background-image: repeating-linear-gradient(var(--rule), var(--rule) 1px, transparent 1px, transparent 8px);
+    background-size: 100% 32px;
+    background-repeat: no-repeat;
+    opacity: 0.9;
+  }
+
+  section { margin-bottom: 8px; }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .section-num {
+    font-family: "Noto Serif JP", serif;
+    font-size: 15px;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  h2 { font-size: 21px; margin: 0; }
+  h3 { font-size: 16px; margin: 28px 0 10px; color: var(--ink); }
+
+  p { margin: 0 0 14px; color: var(--ink-soft); max-width: 62ch; }
+  strong { color: var(--ink); font-weight: 700; }
+  ul, ol { margin: 0 0 14px; padding-left: 1.3em; color: var(--ink-soft); }
+  li { margin-bottom: 6px; max-width: 60ch; }
+  li::marker { color: var(--accent); }
+
+  code, .mono {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.86em;
+  }
+  code {
+    background: var(--code-bg);
+    color: var(--accent);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+  }
+
+  a { color: var(--accent); }
+
+  /* ---------- pipeline diagram ---------- */
+  .pipeline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 0;
+    margin: 24px 0 28px;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--paper-raised);
+  }
+  .pipe-step {
+    flex: 1 1 140px;
+    padding: 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: relative;
+  }
+  .pipe-step + .pipe-step { border-left: 1px dashed var(--rule); }
+  .pipe-step .proc {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .pipe-step .what { font-weight: 700; font-size: 13.5px; }
+  .pipe-step .detail { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+  /* ---------- module tables ---------- */
+  .layer-label {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 24px 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .layer-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rule);
+  }
+
+  .tbl-wrap { overflow-x: auto; margin: 0 0 20px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  caption { text-align: left; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-weight: 700; color: var(--ink); font-size: 12px; letter-spacing: 0.02em; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: none; }
+  td .path { color: var(--accent); }
+  td .role { color: var(--ink-soft); }
+
+  /* ---------- callout ---------- */
+  .callout {
+    border-left: 3px solid var(--accent-line);
+    background: var(--accent-soft);
+    border-radius: 0 8px 8px 0;
+    padding: 14px 18px;
+    margin: 18px 0 22px;
+  }
+  .callout p { margin: 0; color: var(--ink-soft); max-width: none; }
+  .callout p + p { margin-top: 8px; }
+
+  /* ---------- limitation list ---------- */
+  .limit {
+    display: flex;
+    gap: 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .limit:last-child { border-bottom: none; }
+  .limit .mark {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--warn);
+    margin-top: 7px;
+  }
+  .limit .body p { margin: 0; }
+  .limit .body .why { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+
+  footer {
+    margin-top: 64px;
+    padding-top: 20px;
+    border-top: 1px solid var(--rule);
+    font-size: 12px;
+    color: var(--muted);
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+  }
+
+  @media (max-width: 480px) {
+    .cover h1 { font-size: 26px; }
+    .pipeline { flex-direction: column; }
+    .pipe-step + .pipe-step { border-left: none; border-top: 1px dashed var(--rule); }
+  }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@500;700&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<div class="page">
+
+  <div class="cover">
+    <div class="cover-eyebrow">Software Architecture Document</div>
+    <h1>楽譜ドレミ表示 — ソフトウェア構成設計書</h1>
+    <div class="subtitle">PDF楽譜に固定ドのドレミ(カタカナ)を自動で重ねて表示する、Electron製デスクトップアプリ</div>
+    <dl class="cover-meta">
+      <div class="pair"><dt>対象バージョン</dt><dd>現行コードベース(AI補正機能なし)</dd></div>
+      <div class="pair"><dt>プラットフォーム</dt><dd>Electron 44 / Node 24</dd></div>
+      <div class="pair"><dt>言語</dt><dd>TypeScript</dd></div>
+      <div class="pair"><dt>行数</dt><dd>src/ 計 2,962 行</dd></div>
+    </dl>
+  </div>
+
+  <section id="overview">
+    <div class="section-head"><span class="section-num">00</span><h2>概要</h2></div>
+    <p>
+      ユーザーが楽譜PDFを開くと、OMR(光学楽譜認識)エンジン<strong>Audiveris</strong>が五線譜上の音符を認識し、その音符の上に固定ドのドレミ(カタカナ)を自動的にラベル表示する。再生機能(Web Audio APIによる音声合成)、ピアノロール表示、移調、速度変更、両手別ミュート、ドレミ付きPDFのダウンロードなどを備える。
+    </p>
+    <p>
+      設計の核になっているのは「<strong>OMRが検出した音符のピクセル座標をそのまま使い、元のPDF画像の上にラベルを重ねる</strong>」という方針である。座標を自力で再計算せず、Audiveris自身が解析に使った画像と完全に同じ座標系のデータを使うことで、ラベルのズレという最も起こりやすい失敗モードを構造的に防いでいる。
+    </p>
+  </section>
+
+  <div class="staff"></div>
+
+  <section id="architecture">
+    <div class="section-head"><span class="section-num">01</span><h2>プロセス構成</h2></div>
+    <p>
+      Electronの標準的な2プロセス構成。<code>contextIsolation: true</code> / <code>nodeIntegration: false</code> とし、renderer からは <code>preload.ts</code> が公開する <code>window.musicSheet</code> API を介してのみ main プロセスの機能(ファイルI/O・Audiveris起動)を呼び出す。renderer が直接 Node.js API に触れることはない。
+    </p>
+    <div class="layer-label">main process — src/main/</div>
+    <div class="tbl-wrap">
+      <table>
+        <tr><th>ファイル</th><th>役割</th></tr>
+        <tr><td class="mono path">index.ts</td><td class="role">ウィンドウ生成、全IPCハンドラの定義(ファイルダイアログ・変換・履歴・保存)</td></tr>
+        <tr><td class="mono path">omr.ts</td><td class="role">Audiverisの検出・起動(spawn)、進捗ログのパース、MusicXML/.omrの読み出し</td></tr>
+        <tr><td class="mono path">cache.ts</td><td class="role">変換結果の永続キャッシュ(ハッシュ単位のディレクトリ管理)</td></tr>
+        <tr><td class="mono path">preload.ts</td><td class="role">contextBridgeによるAPI公開面(<code>MusicSheetApi</code>の実装)</td></tr>
+      </table>
+    </div>
+    <div class="layer-label">shared — src/shared/</div>
+    <div class="tbl-wrap">
+      <table>
+        <tr><th>ファイル</th><th>役割</th></tr>
+        <tr><td class="mono path">types.ts</td><td class="role">main/renderer共通の型定義。<code>MusicSheetApi</code>がIPC契約そのもの</td></tr>
+      </table>
+    </div>
+    <div class="layer-label">renderer — src/renderer/</div>
+    <div class="tbl-wrap">
+      <table>
+        <tr><th>ファイル</th><th class="num">行</th><th>役割</th></tr>
+        <tr><td class="mono path">app.ts</td><td class="num">743</td><td class="role">全UIの配線・状態管理・各ビューのオーケストレーション</td></tr>
+        <tr><td class="mono path">omr-sheet.ts</td><td class="num">90</td><td class="role">.omrの sheet#N.xml を解析し、音符ごとのピクセル座標を再構成</td></tr>
+        <tr><td class="mono path">musicxml-notes.ts</td><td class="num">231</td><td class="role">MusicXMLを時刻・音高・ページ付きのイベント列に変換(本アプリの心臓部)</td></tr>
+        <tr><td class="mono path">pdf-overlay-view.ts</td><td class="num">210</td><td class="role">元のPDFをcanvasに描画し、ラベルをページ単位で重ねる</td></tr>
+        <tr><td class="mono path">score-view.ts</td><td class="num">169</td><td class="role">(.omr無しの代替)OSMDによる再描画表示とラベル重ね</td></tr>
+        <tr><td class="mono path">label-layout.ts</td><td class="num">175</td><td class="role">ラベルの衝突回避配置アルゴリズム(段組み)</td></tr>
+        <tr><td class="mono path">audio-player.ts</td><td class="num">408</td><td class="role">Web Audio APIによる音声合成エンジン(§5)</td></tr>
+        <tr><td class="mono path">piano-roll.ts</td><td class="num">208</td><td class="role">降下式ピアノロールの描画</td></tr>
+        <tr><td class="mono path">pdf-decrypt.ts</td><td class="num">86</td><td class="role">パスワード付きPDFの検出と復号(再ラスタライズ)</td></tr>
+        <tr><td class="mono path">svg-pdf-export.ts</td><td class="num">71</td><td class="role">(.omr無し用)OSMD描画のPDF書き出し</td></tr>
+        <tr><td class="mono path">solfege.ts</td><td class="num">45</td><td class="role">音名→固定ドのドレミ変換</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <div class="staff"></div>
+
+  <section id="pipeline">
+    <div class="section-head"><span class="section-num">02</span><h2>処理フロー</h2></div>
+    <p>PDFを開いてからドレミ付きの楽譜が表示されるまでの一連の流れ。<code>.omr</code>位置データが得られた場合の主経路(左から右)。</p>
+
+    <div class="pipeline">
+      <div class="pipe-step">
+        <div class="proc">main</div>
+        <div class="what">Audiveris 起動</div>
+        <div class="detail">PDFをバッチ解析し、MusicXML(.mxl)と .omr ブックファイルを出力</div>
+      </div>
+      <div class="pipe-step">
+        <div class="proc">main</div>
+        <div class="what">結果をキャッシュ</div>
+        <div class="detail">PDFのSHA-256ハッシュをキーに score-cache/&lt;hash&gt;/ へ保存</div>
+      </div>
+      <div class="pipe-step">
+        <div class="proc">renderer</div>
+        <div class="what">2系統を並行パース</div>
+        <div class="detail"><code>parseOmrSheet</code>(座標) と <code>parseMusicXmlEvents</code>(音高・時刻)</div>
+      </div>
+      <div class="pipe-step">
+        <div class="proc">renderer</div>
+        <div class="what">ページ単位で突合</div>
+        <div class="detail">chordBoxes[i] ↔ events[i] を対応付け、PDF上にラベルを配置</div>
+      </div>
+      <div class="pipe-step">
+        <div class="proc">renderer</div>
+        <div class="what">再生 / ロール</div>
+        <div class="detail">同じイベント列からWeb Audio再生と降下ノーツを駆動</div>
+      </div>
+    </div>
+
+    <p>
+      <code>.omr</code>が無い(位置データ非対応の変換結果)場合は、OpenSheetMusicDisplayでMusicXMLを再描画し、描画後のSVGノートヘッド座標からラベル位置を求めるフォールバック経路(<code>ScoreView</code>)に切り替わる。
+    </p>
+  </section>
+
+  <div class="staff"></div>
+
+  <section id="design-notes">
+    <div class="section-head"><span class="section-num">03</span><h2>主要な設計判断</h2></div>
+
+    <h3>3.1 座標の正本はAudiveris、音高の正本はMusicXML</h3>
+    <p>
+      ラベルの位置は<code>omr-sheet.ts</code>がAudiverisの内部グラフ(符頭 <code>&lt;head&gt;</code> の <code>&lt;bounds&gt;</code>)から直接取得する。描画を自前で行って座標を再計算する方式は、拡大縮小やウィンドウ幅の変化のたびにズレが蓄積するため採用していない。音高・リズムは同じMusicXMLを<code>musicxml-notes.ts</code>で独立にパースし、インデックス順で両者を対応付ける。
+    </p>
+
+    <h3>3.2 グランドスタッフの2つの表現形に対応</h3>
+    <p>
+      ピアノ曲のMusicXMLは、Audiverisの出力によって(a) 1つの<code>&lt;part&gt;</code>内で<code>&lt;staff&gt;</code>タグにより両手を区別する形と、(b) 両手が完全に別々の<code>&lt;part&gt;</code>要素になる形のどちらでも出てくる。後者は<code>&lt;staff&gt;</code>タグを持たないため、<code>partIndex</code>を手の区別として代用する。
+    </p>
+
+    <h3>3.3 小節・段・ページの三重同期</h3>
+    <div class="callout">
+      <p>
+        2パート構成のとき、各パートは独立に時間カーソルを進めると、OMRの読み取り誤差(符点の誤認識や休符の欠落)が小節ごとにわずかに蓄積し、曲が進むにつれて片手がもう片手より早く(または遅く)なっていく。
+      </p>
+      <p>
+        対策として、<strong>全パートを小節インデックス単位でロックステップ処理</strong>し、各小節の終わりで「どちらかのパートが到達した最大時刻」に両方のカーソルを強制的に同期させる。これにより1小節分の誤差が次の小節に持ち越されない。
+      </p>
+    </div>
+    <p>
+      ラベルの並び順についても同様の注意が必要で、Audiverisの<code>.omr</code>内部データは「1つの段(システム)の中でパート1の全小節→パート2の全小節」という順序でまとまっている。これは単純な小節単位の交互配置とも、パート単位の一括配置とも異なるため、<code>&lt;print new-system&gt;</code> / <code>&lt;print new-page&gt;</code> を境界として段ごとにまとめ、段の中でパートごとにまとめて出力する。
+    </p>
+
+    <h3>3.4 ラベルの衝突回避</h3>
+    <p>
+      <code>label-layout.ts</code>は、音符の真上(または2声目は真下)を起点に、既存ラベルと矩形が重なる限り段(tier)を1つずつ外側へ押し出す単純な貪欲法。Canvasの<code>measureText</code>で実際のラベル幅を計測してから配置するため、カタカナの文字数(「ド」〜「ファ#」など)が異なっても詰まりすぎない。
+    </p>
+  </section>
+
+  <div class="staff"></div>
+
+  <section id="audio">
+    <div class="section-head"><span class="section-num">04</span><h2>音声合成エンジン</h2></div>
+    <p>
+      外部のピアノ音源・サウンドフォント・サンプル素材は一切使用していない。<code>audio-player.ts</code>が Web Audio API の <code>OscillatorNode</code> + <code>PeriodicWave</code> だけで、音色ごとに倍音構成(ハーモニクス配列)とエンベロープ形状を変えて加算合成している。
+    </p>
+    <div class="tbl-wrap">
+      <table>
+        <caption>音色プリセット(VOICE_PRESETS)</caption>
+        <tr><th>音色</th><th>倍音の作り方</th><th>特徴</th></tr>
+        <tr><td>ピアノ</td><td class="mono">ハンマー打弦モデル(打弦点 1/7)</td><td class="role">n次倍音を |sin(nπβ)|/n で減衰 — 実ピアノの音響的特徴</td></tr>
+        <tr><td>エレピ</td><td class="mono">ベル状(不規則減衰)</td><td class="role">タイン(金属棒)的な響き</td></tr>
+        <tr><td>オルガン</td><td class="mono">奇数倍音のみ</td><td class="role">ドローバーオルガン風</td></tr>
+        <tr><td>シンセ</td><td class="mono">ノコギリ波(1/n減衰)</td><td class="role">全倍音を含む明るい音</td></tr>
+        <tr><td>ギター</td><td class="mono">打弦点 1/5</td><td class="role">ピアノと同モデルで爪弾き位置のみ変更</td></tr>
+        <tr><td>マリンバ</td><td class="mono">基音優位+4倍音</td><td class="role">減衰が速く木質的</td></tr>
+        <tr><td>ストリングス</td><td class="mono">ノコギリ波+遅いアタック</td><td class="role">弓が「スッと」入る0.09秒のアタック</td></tr>
+      </table>
+    </div>
+    <p>
+      1音につきオシレーター1基のみ(複数ボイスの重ね合わせは行わない)。密な楽曲でペダル風の余韻を複数音重ねるとCPU負荷が音声レンダリングを圧迫し再生が乱れることが実測で分かったための制約。響きはコンボリューション・リバーブ(ノイズから合成したインパルス応答)で補っている。
+    </p>
+  </section>
+
+  <div class="staff"></div>
+
+  <section id="persistence">
+    <div class="section-head"><span class="section-num">05</span><h2>データ永続化</h2></div>
+    <p>
+      変換結果は<code>app.getPath('userData')/score-cache/&lt;SHA-256ハッシュ&gt;/</code>に保存される。同一PDFを再度開いた際はAudiverisを再実行せず、キャッシュから即座に読み込む。
+    </p>
+    <div class="tbl-wrap">
+      <table>
+        <tr><th>ファイル</th><th>内容</th></tr>
+        <tr><td class="mono">source.pdf</td><td class="role">元のPDF(パスワード付きだった場合は復号・再ラスタライズ後のもの)</td></tr>
+        <tr><td class="mono">score.mxl</td><td class="role">Audiverisが出力したMusicXML</td></tr>
+        <tr><td class="mono">book.omr</td><td class="role">Audiverisの内部シンボルグラフ(zip)。符頭のピクセル座標の正本</td></tr>
+        <tr><td class="mono">manifest.json</td><td class="role">元ファイル名・変換日時・上記ファイル名の記録</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <div class="staff"></div>
+
+  <section id="limitations">
+    <div class="section-head"><span class="section-num">06</span><h2>既知の制約</h2></div>
+
+    <div class="limit">
+      <div class="mark"></div>
+      <div class="body">
+        <p><strong>OMR認識精度そのものには依存する。</strong>Audiverisが符頭を検出できなかった音は、アプリ側のどの処理段階でも復元できない。</p>
+        <div class="why">Audiveris自身が低信頼度と判定した小節には <code>.omr</code> 内で <code>abnormal="true"</code> が付与される(実例: ある楽譜で全100小節中21箇所)。密な和音やト音記号⇔ヘ音記号の切り替えが多い箇所で発生しやすい。</div>
+      </div>
+    </div>
+    <div class="limit">
+      <div class="mark"></div>
+      <div class="body">
+        <p><strong>単一テンポ前提。</strong>曲中の<code>&lt;sound tempo&gt;</code>変化は反映されず、最初に見つかったテンポ(無指定時120bpm)で全体の時間軸を計算する。</p>
+      </div>
+    </div>
+    <div class="limit">
+      <div class="mark"></div>
+      <div class="body">
+        <p><strong>固定ドのみ。</strong>移動ド・オクターブ表記には対応しない(MVP範囲外として設計時に除外)。</p>
+      </div>
+    </div>
+    <div class="limit">
+      <div class="mark"></div>
+      <div class="body">
+        <p><strong>OMR誤認識の手動修正UIは無い。</strong>AIによる低信頼度小節の再読み取り機能を試作したが、Anthropic API利用のための別課金が発生するため不採用とし撤去済み。</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="staff"></div>
+
+  <section id="stack">
+    <div class="section-head"><span class="section-num">07</span><h2>技術スタック</h2></div>
+    <div class="tbl-wrap">
+      <table>
+        <tr><th>区分</th><th>ライブラリ</th><th>用途</th></tr>
+        <tr><td class="role">OMRエンジン</td><td class="mono">Audiveris<span class="mono" style="color:var(--muted)"> (AGPL-3.0)</span></td><td class="role">Javaサブプロセス。内部の記譜フォントは <span class="mono">Bravura</span>(SMuFL準拠)</td></tr>
+        <tr><td class="role">楽譜再描画</td><td class="mono">opensheetmusicdisplay ^2.1.2</td><td class="role">.omr非対応時のフォールバック表示・PDF書き出し</td></tr>
+        <tr><td class="role">PDF処理</td><td class="mono">pdfjs-dist ^6.3.289</td><td class="role">元PDFのラスタライズ、パスワード検出・復号</td></tr>
+        <tr><td class="role">PDF生成</td><td class="mono">pdf-lib ^1.17.1</td><td class="role">ドレミ付きPDFの書き出し</td></tr>
+        <tr><td class="role">アーカイブ</td><td class="mono">adm-zip ^0.6.1</td><td class="role">.mxl / .omr(いずれもzip形式)の読み出し</td></tr>
+        <tr><td class="role">シェル</td><td class="mono">Electron ^44.3.0 / electron-vite ^5.0.0</td><td class="role">デスクトップアプリ化・ビルド</td></tr>
+        <tr><td class="role">テスト</td><td class="mono">Vitest ^5.0.0 / jsdom</td><td class="role">DOM依存のパーサ類を含めて単体テスト</td></tr>
+      </table>
+    </div>
+
+    <h3>テストカバレッジ</h3>
+    <div class="tbl-wrap">
+      <table>
+        <tr><th>テストファイル</th><th>対象</th></tr>
+        <tr><td class="mono path">musicxml-notes.test.ts</td><td class="role">時刻同期・ページ判定・2パート交互配置などタイミング解析の中核</td></tr>
+        <tr><td class="mono path">omr-sheet.test.ts</td><td class="role">.omr座標パース</td></tr>
+        <tr><td class="mono path">piano-roll.test.ts</td><td class="role">イベント列→降下ノーツ変換</td></tr>
+        <tr><td class="mono path">solfege.test.ts</td><td class="role">音名→ドレミ変換</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    music_sheet · src/ 2,962 lines · generated from the current codebase
+  </footer>
+
+</div>
