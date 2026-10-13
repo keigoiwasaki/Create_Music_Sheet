@@ -319,6 +319,24 @@ export function schedulePianoNote(
 const LEAD_IN = 0.15
 /** Extra time after the last note's onset to let its longer pedal tail (and reverb) ring out before tearing down the AudioContext. */
 export const TAIL_BUFFER = 1.6
+/** Notes scheduled per animation frame — see `AudioPlayer.scheduleInChunks`. Small enough to stay
+ * well under a frame budget even on slower hardware, large enough that even a long piece finishes
+ * scheduling within a handful of frames. */
+const AUDIO_SCHEDULE_CHUNK_SIZE = 150
+
+/**
+ * The very first `AudioContext` created in a renderer process pays a one-time cost to spin up the
+ * browser's audio rendering thread and negotiate with the OS audio device — measured at 200ms+,
+ * long enough to visibly freeze the UI if it happens synchronously inside the user's first click
+ * on the play button. Call this once, as early as possible (e.g. right after the app window loads,
+ * not tied to any user action), so that cost is absorbed in the background; every `AudioContext`
+ * created afterwards — including the real one in `AudioPlayer.play()` — is then fast (observed:
+ * ~2ms instead of ~250ms).
+ */
+export function warmUpAudioContext(): void {
+  const ctx = new AudioContext()
+  void ctx.close()
+}
 
 /**
  * Minimal Web Audio synth with a handful of selectable voices (see `VOICE_PRESETS`): one
@@ -366,24 +384,49 @@ export class AudioPlayer {
     } catch (err) {
       console.warn('Reverb unavailable, falling back to dry audio', err)
     }
-    let maxEnd = 0
 
-    for (const note of notes) {
-      try {
-        this.oscillators.push(schedulePianoNote(ctx, destinations, this.wave, note, this.startedAt, this.voice))
-      } catch (err) {
-        // A single malformed note (e.g. bad timing from an OMR/MusicXML edge case) must not
-        // abort scheduling of every note after it in the loop.
-        console.warn('Skipping unplayable note', note, err)
-        continue
-      }
-      maxEnd = Math.max(maxEnd, note.time + note.duration)
-    }
-
+    // maxEnd is cheap to get up front (no Web Audio node creation) — computing it before scheduling
+    // means the end-of-playback timer starts immediately, independent of how long the scheduling
+    // loop below actually takes.
+    const maxEnd = notes.reduce((max, n) => Math.max(max, n.time + n.duration), 0)
     this.endTimer = window.setTimeout(() => {
       this.stop()
       onEnd()
     }, (maxEnd + TAIL_BUFFER) * 1000)
+
+    this.scheduleInChunks(notes, 0, ctx, destinations)
+  }
+
+  /**
+   * Builds each note's Web Audio graph (oscillator + filter + gain, see `schedulePianoNote`) in
+   * small batches across animation frames instead of one synchronous loop over every note. A long,
+   * dense piece (observed: ~2600 notes) was measured blocking the main thread for 100ms+ in one
+   * tick when scheduled synchronously — long enough to visibly freeze the UI right as playback
+   * starts. This is safe to split up because Web Audio schedules each oscillator by its own
+   * absolute clock (`start(ctx.currentTime + ...)`), not by when the JS call scheduling it
+   * happens — a note scheduled a few milliseconds "later" in wall-clock JS time still starts at
+   * the exact right audio time, as long as that time hasn't already passed (the `LEAD_IN` buffer
+   * before the very first note gives this comfortable margin even across several chunked frames).
+   */
+  private scheduleInChunks(notes: PlaybackNote[], startIndex: number, ctx: AudioContext, destinations: AudioNode[]): void {
+    // Captured so a stop() (or a new play() replacing this.ctx) mid-chunking is detected and this
+    // stale continuation aborts instead of scheduling onto a context that's no longer playing.
+    const generation = this.ctx
+    const end = Math.min(startIndex + AUDIO_SCHEDULE_CHUNK_SIZE, notes.length)
+
+    for (let i = startIndex; i < end; i++) {
+      try {
+        this.oscillators.push(schedulePianoNote(ctx, destinations, this.wave!, notes[i], this.startedAt, this.voice))
+      } catch (err) {
+        // A single malformed note (e.g. bad timing from an OMR/MusicXML edge case) must not
+        // abort scheduling of every note after it.
+        console.warn('Skipping unplayable note', notes[i], err)
+      }
+    }
+
+    if (end < notes.length && this.ctx === generation) {
+      requestAnimationFrame(() => this.scheduleInChunks(notes, end, ctx, destinations))
+    }
   }
 
   stop(): void {

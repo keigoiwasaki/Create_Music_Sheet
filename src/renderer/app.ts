@@ -3,7 +3,7 @@ import { ScoreView } from './score-view'
 import { PdfOverlayView } from './pdf-overlay-view'
 import { parseOmrSheet, type OmrSheetData } from './omr-sheet'
 import { parseMusicXmlEvents, type ChordEvent } from './musicxml-notes'
-import { AudioPlayer, chordEventsToPlaybackNotes, VOICE_PRESETS } from './audio-player'
+import { AudioPlayer, chordEventsToPlaybackNotes, VOICE_PRESETS, warmUpAudioContext } from './audio-player'
 import { chordEventsToRollNotes, PianoRollRenderer, type HandMuteState } from './piano-roll'
 import { exportOsmdAsPdf } from './svg-pdf-export'
 import { decryptPdfIfNeeded } from './pdf-decrypt'
@@ -771,3 +771,7 @@ toggleLabelsButton.addEventListener('click', () => {
 })
 
 refreshHistory()
+
+// Absorbs the ~200ms+ one-time cost of spinning up the browser's audio thread in the background,
+// well before the user's first click on the play button — see `warmUpAudioContext`.
+warmUpAudioContext()
