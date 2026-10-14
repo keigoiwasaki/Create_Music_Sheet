@@ -316,6 +316,104 @@ export function schedulePianoNote(
   return osc
 }
 
+const NOTE_NAMES = ['C', 'Cs', 'D', 'Ds', 'E', 'F', 'Fs', 'G', 'Gs', 'A', 'As', 'B']
+// The bundled recordings (src/renderer/public/piano-samples, see its LICENSE.md for provenance)
+// cover every semitone from C1 to C8 — nearly the full 88-key range, missing only the bottom three
+// keys (A0/A#0/B0), which essentially never appear in piano sheet music.
+const SAMPLE_MIN_MIDI = 24
+const SAMPLE_MAX_MIDI = 108
+
+function midiToSampleName(midi: number): string {
+  const name = NOTE_NAMES[((midi % 12) + 12) % 12]
+  const octave = Math.floor(midi / 12) - 1
+  return `${name}${octave}`
+}
+
+const pianoSampleBuffers = new Map<number, AudioBuffer>()
+let pianoSamplesPromise: Promise<void> | null = null
+
+/**
+ * Loads the bundled real-piano recordings in the background, decoded once and cached here for the
+ * lifetime of the renderer process. Call this once, early (e.g. alongside `warmUpAudioContext` at
+ * app startup) — `AudioPlayer.play()` never awaits it: a note whose sample has already finished
+ * loading plays from the recording, and any note still missing (only possible for a click in the
+ * first second or two after the app window opens) transparently falls back to the synthesized tone
+ * (`schedulePianoNote`) for just that one call.
+ */
+export function loadPianoSamples(): Promise<void> {
+  if (pianoSamplesPromise) return pianoSamplesPromise
+  pianoSamplesPromise = (async () => {
+    const ctx = new AudioContext()
+    try {
+      const midiNumbers = Array.from({ length: SAMPLE_MAX_MIDI - SAMPLE_MIN_MIDI + 1 }, (_, i) => SAMPLE_MIN_MIDI + i)
+      await Promise.all(
+        midiNumbers.map(async (midi) => {
+          try {
+            const response = await fetch(`piano-samples/${midiToSampleName(midi)}.mp3`)
+            if (!response.ok) return
+            const arrayBuffer = await response.arrayBuffer()
+            const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+            pianoSampleBuffers.set(midi, audioBuffer)
+          } catch (err) {
+            console.warn('Failed to load piano sample for midi', midi, err)
+          }
+        })
+      )
+    } finally {
+      void ctx.close()
+    }
+  })()
+  return pianoSamplesPromise
+}
+
+/**
+ * Schedules one note as playback of a real recorded piano sample instead of synthesis — see
+ * `schedulePianoNote` for the synthesized fallback used by every other voice preset (and by piano
+ * itself until its samples finish loading). `buffer` is an exact recording for `note.midi` only
+ * when it falls in the bundled C1–C8 range; outside that (rare), the nearest edge sample is pitch-
+ * shifted via `playbackRate` rather than left silent.
+ */
+function scheduleSampledPianoNote(
+  ctx: BaseAudioContext,
+  destinations: AudioNode | AudioNode[],
+  buffer: AudioBuffer,
+  note: PlaybackNote,
+  sampleMidi: number,
+  baseTime: number
+): AudioBufferSourceNode {
+  const start = Math.max(baseTime, baseTime + note.time)
+
+  // Same pitch-dependent ring/tail shaping as the synthesized piano preset (schedulePianoNote) —
+  // bass notes ring longer, treble notes die out faster, still capped so a dense passage's tails
+  // don't stack up and overload audio rendering.
+  const pitchRingFactor = Math.min(1.6, Math.max(0.55, 1.5 - (note.midi - 48) * 0.012))
+  const ring = Math.min(Math.max(note.duration * 1.15 * pitchRingFactor, 0.25), 2.2)
+  const velocity = 0.85 + Math.random() * 0.3
+  const releaseStart = start + ring
+  const stopAt = releaseStart + 0.3
+
+  const gain = ctx.createGain()
+  // The recording already has its own natural hammer-strike transient — only a sub-5ms fade-in to
+  // avoid a click from starting the buffer exactly at a non-zero sample, not a synthesized attack.
+  gain.gain.setValueAtTime(0.0001, start)
+  gain.gain.exponentialRampToValueAtTime(velocity, start + 0.005)
+  gain.gain.setValueAtTime(velocity, releaseStart)
+  // Fades the recording's own tail out early for notes cut short by a fast passage, instead of
+  // always letting the full recorded decay ring out and bleed into the next note.
+  gain.gain.exponentialRampToValueAtTime(0.0001, stopAt)
+
+  const source = ctx.createBufferSource()
+  source.buffer = buffer
+  source.playbackRate.value = Math.pow(2, (note.midi - sampleMidi) / 12)
+  source.connect(gain)
+  for (const destination of Array.isArray(destinations) ? destinations : [destinations]) {
+    gain.connect(destination)
+  }
+  source.start(start)
+  source.stop(stopAt)
+  return source
+}
+
 const LEAD_IN = 0.15
 /** Extra time after the last note's onset to let its longer pedal tail (and reverb) ring out before tearing down the AudioContext. */
 export const TAIL_BUFFER = 1.6
@@ -346,7 +444,7 @@ export function warmUpAudioContext(): void {
 export class AudioPlayer {
   private ctx: AudioContext | null = null
   private wave: PeriodicWave | null = null
-  private oscillators: OscillatorNode[] = []
+  private oscillators: AudioScheduledSourceNode[] = []
   private endTimer: number | null = null
   private startedAt = 0
   private voice: VoicePreset = DEFAULT_VOICE_PRESET
@@ -415,12 +513,21 @@ export class AudioPlayer {
     const end = Math.min(startIndex + AUDIO_SCHEDULE_CHUNK_SIZE, notes.length)
 
     for (let i = startIndex; i < end; i++) {
+      const note = notes[i]
       try {
-        this.oscillators.push(schedulePianoNote(ctx, destinations, this.wave!, notes[i], this.startedAt, this.voice))
+        // Real recordings only exist for the piano voice; every other preset keeps its synthesized
+        // tone. Even for piano, a note falls back to synthesis if its sample hasn't finished
+        // loading yet (only possible within the first second or two after app startup).
+        const sampleMidi = Math.min(SAMPLE_MAX_MIDI, Math.max(SAMPLE_MIN_MIDI, Math.round(note.midi)))
+        const buffer = this.voice.id === 'piano' ? pianoSampleBuffers.get(sampleMidi) : undefined
+        const node = buffer
+          ? scheduleSampledPianoNote(ctx, destinations, buffer, note, sampleMidi, this.startedAt)
+          : schedulePianoNote(ctx, destinations, this.wave!, note, this.startedAt, this.voice)
+        this.oscillators.push(node)
       } catch (err) {
         // A single malformed note (e.g. bad timing from an OMR/MusicXML edge case) must not
         // abort scheduling of every note after it.
-        console.warn('Skipping unplayable note', notes[i], err)
+        console.warn('Skipping unplayable note', note, err)
       }
     }
 
