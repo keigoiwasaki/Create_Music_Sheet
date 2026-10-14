@@ -3,7 +3,8 @@ import { basename, extname, join } from 'node:path'
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { cleanupOmrOutput, convertPdfToMusicXml, readMusicXmlText, readOmrSheets, readScoreFile } from './omr'
-import { deleteCacheEntry, hashFile, listCacheEntries, readCacheEntry, resolveCachePath, writeCacheEntry } from './cache'
+import { checkHomrAvailable, cleanupHomrOutput, convertPagesToMusicXmlViaHomr } from './homr'
+import { buildCacheKey, deleteCacheEntry, hashFile, listCacheEntries, readCacheEntry, resolveCachePath, writeCacheEntry } from './cache'
 import type { ConvertPdfResponse, HistoryEntry } from '../shared/types'
 
 function createWindow(): void {
@@ -35,15 +36,17 @@ ipcMain.handle('open-pdf-dialog', async () => {
 
 ipcMain.handle('convert-pdf-to-musicxml', async (event, pdfPath: string): Promise<ConvertPdfResponse> => {
   const hash = await hashFile(pdfPath)
-  const cached = await readCacheEntry(hash)
+  const cacheKey = buildCacheKey(hash, 'audiveris')
+  const cached = await readCacheEntry(cacheKey)
   if (cached) {
     event.sender.send('omr-progress', 'キャッシュから読み込みました')
     return {
       ok: true,
-      pdfPath: resolveCachePath(hash, cached.pdfFile),
-      musicXmlPath: resolveCachePath(hash, cached.musicXmlFile),
-      omrPath: cached.omrFile ? resolveCachePath(hash, cached.omrFile) : null,
+      pdfPath: resolveCachePath(cacheKey, cached.pdfFile),
+      musicXmlPath: resolveCachePath(cacheKey, cached.musicXmlFile),
+      omrPath: cached.omrFile ? resolveCachePath(cacheKey, cached.omrFile) : null,
       fromCache: true,
+      engine: 'audiveris',
     }
   }
 
@@ -52,32 +55,76 @@ ipcMain.handle('convert-pdf-to-musicxml', async (event, pdfPath: string): Promis
   })
   if (!result.ok) return result
 
-  const manifest = await writeCacheEntry(hash, basename(pdfPath), pdfPath, result.musicXmlPath, result.omrPath)
+  const manifest = await writeCacheEntry(cacheKey, hash, 'audiveris', basename(pdfPath), pdfPath, result.musicXmlPath, result.omrPath)
   await cleanupOmrOutput(result.musicXmlPath)
 
   return {
     ok: true,
-    pdfPath: resolveCachePath(hash, manifest.pdfFile),
-    musicXmlPath: resolveCachePath(hash, manifest.musicXmlFile),
-    omrPath: manifest.omrFile ? resolveCachePath(hash, manifest.omrFile) : null,
+    pdfPath: resolveCachePath(cacheKey, manifest.pdfFile),
+    musicXmlPath: resolveCachePath(cacheKey, manifest.musicXmlFile),
+    omrPath: manifest.omrFile ? resolveCachePath(cacheKey, manifest.omrFile) : null,
     fromCache: false,
+    engine: 'audiveris',
   }
 })
+
+ipcMain.handle('check-homr-available', async () => {
+  return checkHomrAvailable()
+})
+
+ipcMain.handle(
+  'convert-pdf-to-musicxml-via-homr',
+  async (event, pdfPath: string, pngPages: Uint8Array[]): Promise<ConvertPdfResponse> => {
+    const hash = await hashFile(pdfPath)
+    const cacheKey = buildCacheKey(hash, 'homr')
+    const cached = await readCacheEntry(cacheKey)
+    if (cached) {
+      event.sender.send('omr-progress', 'キャッシュから読み込みました')
+      return {
+        ok: true,
+        pdfPath: resolveCachePath(cacheKey, cached.pdfFile),
+        musicXmlPath: resolveCachePath(cacheKey, cached.musicXmlFile),
+        omrPath: null,
+        fromCache: true,
+        engine: 'homr',
+      }
+    }
+
+    const result = await convertPagesToMusicXmlViaHomr(pngPages, (message) => {
+      event.sender.send('omr-progress', message)
+    })
+    if (!result.ok) return result
+
+    const manifest = await writeCacheEntry(cacheKey, hash, 'homr', basename(pdfPath), pdfPath, result.musicXmlPath, null)
+    await cleanupHomrOutput(result.musicXmlPath)
+
+    return {
+      ok: true,
+      pdfPath: resolveCachePath(cacheKey, manifest.pdfFile),
+      musicXmlPath: resolveCachePath(cacheKey, manifest.musicXmlFile),
+      omrPath: null,
+      fromCache: false,
+      engine: 'homr',
+    }
+  }
+)
 
 ipcMain.handle('list-history', async (): Promise<HistoryEntry[]> => {
   const entries = await listCacheEntries()
   return entries.map((entry) => ({
     hash: entry.hash,
+    cacheKey: entry.cacheKey,
+    engine: entry.engine,
     originalFileName: entry.originalFileName,
     convertedAt: entry.convertedAt,
-    pdfPath: resolveCachePath(entry.hash, entry.pdfFile),
-    musicXmlPath: resolveCachePath(entry.hash, entry.musicXmlFile),
-    omrPath: entry.omrFile ? resolveCachePath(entry.hash, entry.omrFile) : null,
+    pdfPath: resolveCachePath(entry.cacheKey, entry.pdfFile),
+    musicXmlPath: resolveCachePath(entry.cacheKey, entry.musicXmlFile),
+    omrPath: entry.omrFile ? resolveCachePath(entry.cacheKey, entry.omrFile) : null,
   }))
 })
 
-ipcMain.handle('delete-history-entry', async (_event, hash: string) => {
-  await deleteCacheEntry(hash)
+ipcMain.handle('delete-history-entry', async (_event, cacheKey: string) => {
+  await deleteCacheEntry(cacheKey)
 })
 
 ipcMain.handle('read-score-file', async (_event, path: string) => {

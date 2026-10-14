@@ -91,11 +91,19 @@ interface MeasureEvents {
  *    too) and emitted system-by-system, part-by-part within each system — independent of the timing
  *    pass above, which only decides each event's `.time`.
  */
+/** The single tempo (first `<sound tempo>` found, or 120bpm) this whole module assumes for the
+ * piece. Exported so any OTHER code deriving timing from the same MusicXML — e.g. `score-view.ts`
+ * computing highlight timing straight from OSMD's own parsed structure — uses the exact same value,
+ * rather than risking two independently-detected tempos drifting apart. */
+export function getTempoBpm(xmlText: string): number {
+  const doc = new DOMParser().parseFromString(xmlText, 'application/xml')
+  const tempoAttr = doc.querySelector('sound[tempo]')?.getAttribute('tempo')
+  return tempoAttr ? Number(tempoAttr) : DEFAULT_TEMPO_BPM
+}
+
 export function parseMusicXmlEvents(xmlText: string): ChordEvent[] {
   const doc = new DOMParser().parseFromString(xmlText, 'application/xml')
-
-  const tempoAttr = doc.querySelector('sound[tempo]')?.getAttribute('tempo')
-  const tempo = tempoAttr ? Number(tempoAttr) : DEFAULT_TEMPO_BPM
+  const tempo = getTempoBpm(xmlText)
 
   const parts = Array.from(doc.getElementsByTagName('part'))
   const partMeasureLists = parts.map((part) => Array.from(part.children).filter((c) => c.tagName === 'measure'))

@@ -5,4 +5,6 @@ dist/
 .DS_Store
 vendor/audiveris/*
 !vendor/audiveris/README.md
+vendor/homr/*
+!vendor/homr/README.md
 .claude/settings.local.json

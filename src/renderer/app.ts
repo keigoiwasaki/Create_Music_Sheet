@@ -3,12 +3,13 @@ import { ScoreView } from './score-view'
 import { PdfOverlayView } from './pdf-overlay-view'
 import { parseOmrSheet, type OmrSheetData } from './omr-sheet'
 import { parseMusicXmlEvents, type ChordEvent } from './musicxml-notes'
-import { AudioPlayer, chordEventsToPlaybackNotes, VOICE_PRESETS } from './audio-player'
+import { AudioPlayer, chordEventsToPlaybackNotes, VOICE_PRESETS, warmUpAudioContext, loadPianoSamples } from './audio-player'
 import { chordEventsToRollNotes, PianoRollRenderer, type HandMuteState } from './piano-roll'
 import { exportOsmdAsPdf } from './svg-pdf-export'
 import { decryptPdfIfNeeded } from './pdf-decrypt'
+import { rasterizePdfPagesToPng } from './pdf-rasterize'
 import type { HighlightEntry } from './label-layout'
-import type { ConvertPdfResult, HistoryEntry } from '../shared/types'
+import type { ConvertPdfResponse, ConvertPdfResult, HistoryEntry } from '../shared/types'
 
 const appLayout = document.getElementById('app-layout') as HTMLElement
 const divider = document.getElementById('divider') as HTMLElement
@@ -17,6 +18,8 @@ const collapseSidebarButton = document.getElementById('collapse-sidebar-button')
 const toggleLabelsButton = document.getElementById('toggle-labels-button') as HTMLButtonElement
 const sidebar = document.getElementById('sidebar') as HTMLElement
 const openButton = document.getElementById('open-button') as HTMLButtonElement
+const engineSelect = document.getElementById('engine-select') as HTMLSelectElement
+const engineHint = document.getElementById('engine-hint') as HTMLElement
 const passwordModal = document.getElementById('password-modal') as HTMLElement
 const passwordInput = document.getElementById('password-input') as HTMLInputElement
 const passwordError = document.getElementById('password-error') as HTMLElement
@@ -329,7 +332,7 @@ async function setCurrentPiece(musicXmlText: string | null): Promise<void> {
   }
 }
 
-async function refreshHistory(selectHash?: string): Promise<void> {
+async function refreshHistory(selectCacheKey?: string): Promise<void> {
   const entries = await window.musicSheet.listHistory()
   historySelect.replaceChildren()
   const placeholder = document.createElement('option')
@@ -339,13 +342,14 @@ async function refreshHistory(selectHash?: string): Promise<void> {
 
   for (const entry of entries) {
     const option = document.createElement('option')
-    option.value = entry.hash
+    option.value = entry.cacheKey
     const date = new Date(entry.convertedAt)
-    option.textContent = `${entry.originalFileName} (${date.toLocaleDateString('ja-JP')} ${date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })})`
+    const engineSuffix = entry.engine === 'homr' ? '(homr)' : ''
+    option.textContent = `${entry.originalFileName} (${date.toLocaleDateString('ja-JP')} ${date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}) ${engineSuffix}`.trim()
     historySelect.appendChild(option)
   }
 
-  if (selectHash) historySelect.value = selectHash
+  if (selectCacheKey) historySelect.value = selectCacheKey
   historyDeleteButton.disabled = !historySelect.value
 }
 
@@ -391,6 +395,10 @@ async function loadConvertResult(result: ConvertPdfResult, displayName: string):
 
 window.musicSheet.onOmrProgress((message) => {
   setStatus(message)
+})
+
+engineSelect.addEventListener('change', () => {
+  engineHint.hidden = engineSelect.value !== 'homr'
 })
 
 speedSlider.addEventListener('input', () => {
@@ -478,6 +486,27 @@ function promptForPassword(attemptFailed: boolean): Promise<string | null> {
   })
 }
 
+async function convertViaAudiveris(effectivePdfPath: string): Promise<ConvertPdfResponse> {
+  setStatus('楽譜を認識しています(Audiveris)...')
+  return window.musicSheet.convertPdfToMusicXml(effectivePdfPath)
+}
+
+/** Returns `null` (already reported via setStatus) if homr isn't installed — the caller should
+ * just stop, not treat `null` as a ConvertPdfError. */
+async function convertViaHomr(effectivePdfPath: string, pdfBytes: Uint8Array): Promise<ConvertPdfResponse | null> {
+  setStatus('homrの利用可否を確認しています...')
+  if (!(await window.musicSheet.checkHomrAvailable())) {
+    setStatus('homrが見つかりません。vendor/homr/README.md の手順でインストールしてください。', true)
+    return null
+  }
+
+  setStatus('PDFをページ画像に変換しています...')
+  const pngPages = await rasterizePdfPagesToPng(pdfBytes)
+
+  setStatus(`楽譜を認識しています(homr・実験的: 全${pngPages.length}ページ、1ページ数分〜十数分かかることがあります)...`)
+  return window.musicSheet.convertPdfToMusicXmlViaHomr(effectivePdfPath, pngPages)
+}
+
 openButton.addEventListener('click', async () => {
   const pdfPath = await window.musicSheet.openPdfDialog()
   if (!pdfPath) return
@@ -499,12 +528,13 @@ openButton.addEventListener('click', async () => {
 
     const fileName = pdfPath.split(/[\\/]/).pop() ?? 'score.pdf'
     // Only when it was actually decrypted (bytesToConvert is a new buffer, not the same bytes we
-    // just read) does Audiveris need a different file — handing it the rebuilt, unprotected PDF
-    // instead of the original, since that's the one it can actually read.
+    // just read) does the OMR engine need a different file — handing it the rebuilt, unprotected
+    // PDF instead of the original, since that's the one it can actually read.
     const effectivePdfPath = bytesToConvert === originalBytes ? pdfPath : await window.musicSheet.writeTempPdf(bytesToConvert, fileName)
 
-    setStatus('楽譜を認識しています(Audiveris)...')
-    const result = await window.musicSheet.convertPdfToMusicXml(effectivePdfPath)
+    const result =
+      engineSelect.value === 'homr' ? await convertViaHomr(effectivePdfPath, bytesToConvert) : await convertViaAudiveris(effectivePdfPath)
+    if (!result) return // already reported (not-available / canceled) inside the helper
     if (!result.ok) {
       setStatus(result.message, true)
       return
@@ -520,12 +550,12 @@ openButton.addEventListener('click', async () => {
 })
 
 historySelect.addEventListener('change', async () => {
-  const hash = historySelect.value
-  historyDeleteButton.disabled = !hash
-  if (!hash) return
+  const cacheKey = historySelect.value
+  historyDeleteButton.disabled = !cacheKey
+  if (!cacheKey) return
 
   const entries = await window.musicSheet.listHistory()
-  const entry = entries.find((e: HistoryEntry) => e.hash === hash)
+  const entry = entries.find((e: HistoryEntry) => e.cacheKey === cacheKey)
   if (!entry) return
 
   downloadButton.disabled = true
@@ -533,7 +563,7 @@ historySelect.addEventListener('change', async () => {
   setStatus('履歴から読み込んでいます...')
   try {
     await loadConvertResult(
-      { ok: true, pdfPath: entry.pdfPath, musicXmlPath: entry.musicXmlPath, omrPath: entry.omrPath, fromCache: true },
+      { ok: true, pdfPath: entry.pdfPath, musicXmlPath: entry.musicXmlPath, omrPath: entry.omrPath, fromCache: true, engine: entry.engine },
       entry.originalFileName
     )
   } catch (err) {
@@ -542,9 +572,9 @@ historySelect.addEventListener('change', async () => {
 })
 
 historyDeleteButton.addEventListener('click', async () => {
-  const hash = historySelect.value
-  if (!hash) return
-  await window.musicSheet.deleteHistoryEntry(hash)
+  const cacheKey = historySelect.value
+  if (!cacheKey) return
+  await window.musicSheet.deleteHistoryEntry(cacheKey)
   await refreshHistory()
   setStatus('履歴を削除しました')
 })
@@ -741,3 +771,9 @@ toggleLabelsButton.addEventListener('click', () => {
 })
 
 refreshHistory()
+
+// Absorbs the ~200ms+ one-time cost of spinning up the browser's audio thread in the background,
+// well before the user's first click on the play button — see `warmUpAudioContext`.
+warmUpAudioContext()
+// Starts decoding the real piano recordings in the background too — see `loadPianoSamples`.
+void loadPianoSamples()
