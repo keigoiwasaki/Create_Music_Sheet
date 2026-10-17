@@ -22,6 +22,13 @@ interface NoteheadProvider {
   vfnoteIndex: number
 }
 
+/** Scale used by `compactLayout` for both `EngravingRules.StaffHeight` and the ドレミ label font —
+ * see the ScoreView constructor doc for how this was tuned. Note: OSMD's own `zoom` was tried
+ * first and measured to have NO effect on page count — it scales the page itself along with its
+ * content (like zooming a PDF viewer), not how much fits on a fixed physical page. `StaffHeight`
+ * shrinks the staff relative to the page, which does reduce page count. */
+const COMPACT_ZOOM = 0.8
+
 export class ScoreView {
   private readonly osmd: OpenSheetMusicDisplay
   private readonly labelLayer: HTMLElement
@@ -33,15 +40,25 @@ export class ScoreView {
    * uses, read from the same `<sound tempo>` detection `musicxml-notes.ts` uses for playback, so
    * the two can never drift apart even if OSMD's own internal tempo detection differs. */
   private secondsPerWholeNote = (60 / 120) * 4
+  /** Matches `COMPACT_ZOOM` in `compactLayout` mode, so the ドレミ overlay (ours, not OSMD's)
+   * shrinks along with the notation instead of staying full-size — see the constructor doc. */
+  private labelFontScale = 1
 
   /**
    * `pageFormat`, e.g. "A4_P", splits rendering into fixed-size pages (for print/PDF export)
    * instead of one continuous scroll. `compactLayout` tightens page margins/system spacing, drops
-   * the title, and fits more measures per line (0.6x OSMD's normal note/measure spacing — verified
-   * against a 125-measure piece: 18 pages down to 11, with no notehead/label overlap even in dense
-   * chord passages). An earlier, far more aggressive attempt (0.2x) did overlap and was reverted;
-   * 0.6x sits well clear of that, and pushing further to 0.5x only trimmed one more page, so this
-   * is close to the density/readability sweet spot.
+   * the title, shrinks the staff itself (`StaffHeight *= COMPACT_ZOOM`, which — unlike OSMD's own
+   * `zoom`, see `COMPACT_ZOOM`'s doc — actually fits more per physical page), and fits more
+   * measures per line (0.6x OSMD's normal note/measure spacing). Verified against a 125-measure
+   * piece: 18 pages down to 10 with both changes combined, with no notehead/label overlap even in
+   * dense chord passages (pushing `COMPACT_ZOOM` further, to 0.65, saved no additional pages — 0.8
+   * is already past the point of diminishing returns, so there's no reason to shrink further).
+   * `labelFontScale` is kept in sync with `COMPACT_ZOOM` (see `renderLabels`): the ドレミ labels are
+   * our own overlay, not part of OSMD's own rendering, so without this they'd stay full-size over
+   * the shrunk staff and look oversized — and could overlap each other, since collision-avoidance
+   * in label-layout.ts sizes its boxes from this same scale. An earlier, far more aggressive
+   * spacing-only attempt (0.2x, no staff shrink) did overlap and was reverted; this combination
+   * sits well clear of that.
    */
   constructor(container: HTMLElement, labelLayer: HTMLElement, options: { pageFormat?: string; compactLayout?: boolean } = {}) {
     this.container = container
@@ -53,7 +70,9 @@ export class ScoreView {
     })
     this.osmd.TransposeCalculator = new TransposeCalculator()
     if (options.compactLayout) {
+      this.labelFontScale = COMPACT_ZOOM
       const rules = this.osmd.EngravingRules
+      rules.StaffHeight *= COMPACT_ZOOM
       rules.RenderTitle = false
       rules.PageTopMargin *= 0.4
       rules.PageBottomMargin *= 0.4
@@ -114,7 +133,7 @@ export class ScoreView {
       }
     }
 
-    const { placements, elements } = placeLabelsAvoidingOverlap(candidates, this.labelLayer)
+    const { placements, elements } = placeLabelsAvoidingOverlap(candidates, this.labelLayer, this.labelFontScale)
     this.placements = placements
     this.highlightEntries = buildHighlightEntries(placements, elements)
   }
