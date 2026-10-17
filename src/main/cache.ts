@@ -110,3 +110,12 @@ export async function listCacheEntries(): Promise<CacheManifest[]> {
 export async function deleteCacheEntry(cacheKey: string): Promise<void> {
   await rm(join(getCacheDir(), cacheKey), { recursive: true, force: true }).catch(() => {})
 }
+
+/** Updates a cache entry's display name in its manifest — the cached PDF/MusicXML files themselves are untouched. */
+export async function renameCacheEntry(cacheKey: string, newName: string): Promise<void> {
+  const manifestPath = resolveCachePath(cacheKey, 'manifest.json')
+  const entry = await readCacheEntry(cacheKey)
+  if (!entry) return
+  const manifest: CacheManifest = { ...entry, originalFileName: newName }
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8')
+}

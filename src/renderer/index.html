@@ -334,6 +334,21 @@
         color: var(--purple-100);
         margin-bottom: 4px;
       }
+      /* Label and its control side by side on one line, instead of the label stacked above —
+         used where the row has just one field and the stacked layout wastes vertical space. */
+      .sidebar-row.inline-field {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .sidebar-row.inline-field .field-label {
+        margin-bottom: 0;
+        flex: 0 0 auto;
+      }
+      .sidebar-row.inline-field select {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
       .field-hint {
         font-size: 11px;
         color: rgba(255, 255, 255, 0.55);
@@ -641,13 +656,8 @@
       <div id="sidebar">
         <div class="sidebar-section">
           <div class="sidebar-row">
-            <label class="field-label" for="engine-select">認識エンジン</label>
-            <select id="engine-select">
-              <option value="audiveris">Audiveris(既定)</option>
-              <option value="homr">homr(実験的・低速)</option>
-            </select>
-            <div id="engine-hint" class="field-hint" hidden>
-              homrは実験的なエンジンです。元のPDFへの重ね表示はできず(再描画表示になります)、1ページあたり数分〜十数分かかることがあります。
+            <div class="field-hint">
+              元のPDFへの重ね表示はできず(再描画表示になります)、1ページあたり数分〜十数分かかることがあります。
             </div>
           </div>
           <div class="sidebar-row button-row">
@@ -655,6 +665,7 @@
             <select id="history-select"><option value="">履歴(選択してください)</option></select>
           </div>
           <div class="sidebar-row button-row">
+            <button id="history-rename-button" disabled title="選択した履歴の名前を変更">リネーム</button>
             <button id="history-delete-button" disabled title="選択した履歴を削除">削除</button>
           </div>
         </div>
@@ -681,7 +692,7 @@
               <span id="key-shift-label">0</span>
             </div>
           </div>
-          <div class="sidebar-row">
+          <div class="sidebar-row inline-field">
             <label class="field-label" for="voice-select">音色</label>
             <select id="voice-select"></select>
           </div>

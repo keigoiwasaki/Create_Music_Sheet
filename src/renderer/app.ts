@@ -18,14 +18,13 @@ const collapseSidebarButton = document.getElementById('collapse-sidebar-button')
 const toggleLabelsButton = document.getElementById('toggle-labels-button') as HTMLButtonElement
 const sidebar = document.getElementById('sidebar') as HTMLElement
 const openButton = document.getElementById('open-button') as HTMLButtonElement
-const engineSelect = document.getElementById('engine-select') as HTMLSelectElement
-const engineHint = document.getElementById('engine-hint') as HTMLElement
 const passwordModal = document.getElementById('password-modal') as HTMLElement
 const passwordInput = document.getElementById('password-input') as HTMLInputElement
 const passwordError = document.getElementById('password-error') as HTMLElement
 const passwordCancelButton = document.getElementById('password-cancel-button') as HTMLButtonElement
 const passwordSubmitButton = document.getElementById('password-submit-button') as HTMLButtonElement
 const historySelect = document.getElementById('history-select') as HTMLSelectElement
+const historyRenameButton = document.getElementById('history-rename-button') as HTMLButtonElement
 const historyDeleteButton = document.getElementById('history-delete-button') as HTMLButtonElement
 const downloadButton = document.getElementById('download-button') as HTMLButtonElement
 const muteRightCheckbox = document.getElementById('mute-right') as HTMLInputElement
@@ -350,6 +349,7 @@ async function refreshHistory(selectCacheKey?: string): Promise<void> {
   }
 
   if (selectCacheKey) historySelect.value = selectCacheKey
+  historyRenameButton.disabled = !historySelect.value
   historyDeleteButton.disabled = !historySelect.value
 }
 
@@ -395,10 +395,6 @@ async function loadConvertResult(result: ConvertPdfResult, displayName: string):
 
 window.musicSheet.onOmrProgress((message) => {
   setStatus(message)
-})
-
-engineSelect.addEventListener('change', () => {
-  engineHint.hidden = engineSelect.value !== 'homr'
 })
 
 speedSlider.addEventListener('input', () => {
@@ -532,8 +528,9 @@ openButton.addEventListener('click', async () => {
     // PDF instead of the original, since that's the one it can actually read.
     const effectivePdfPath = bytesToConvert === originalBytes ? pdfPath : await window.musicSheet.writeTempPdf(bytesToConvert, fileName)
 
-    const result =
-      engineSelect.value === 'homr' ? await convertViaHomr(effectivePdfPath, bytesToConvert) : await convertViaAudiveris(effectivePdfPath)
+    // homr-only for now — Audiveris support (convertViaAudiveris) is kept in place, not wired up,
+    // in case engine choice comes back later.
+    const result = await convertViaHomr(effectivePdfPath, bytesToConvert)
     if (!result) return // already reported (not-available / canceled) inside the helper
     if (!result.ok) {
       setStatus(result.message, true)
@@ -551,6 +548,7 @@ openButton.addEventListener('click', async () => {
 
 historySelect.addEventListener('change', async () => {
   const cacheKey = historySelect.value
+  historyRenameButton.disabled = !cacheKey
   historyDeleteButton.disabled = !cacheKey
   if (!cacheKey) return
 
@@ -569,6 +567,21 @@ historySelect.addEventListener('change', async () => {
   } catch (err) {
     setStatus(`エラー: ${(err as Error).message}`, true)
   }
+})
+
+historyRenameButton.addEventListener('click', async () => {
+  const cacheKey = historySelect.value
+  if (!cacheKey) return
+  const entries = await window.musicSheet.listHistory()
+  const entry = entries.find((e: HistoryEntry) => e.cacheKey === cacheKey)
+  if (!entry) return
+
+  const newName = window.prompt('新しい名前を入力してください', entry.originalFileName)?.trim()
+  if (!newName || newName === entry.originalFileName) return
+
+  await window.musicSheet.renameHistoryEntry(cacheKey, newName)
+  await refreshHistory(cacheKey)
+  setStatus('名前を変更しました')
 })
 
 historyDeleteButton.addEventListener('click', async () => {

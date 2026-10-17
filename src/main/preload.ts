@@ -19,6 +19,8 @@ const api: MusicSheetApi = {
     ipcRenderer.invoke('write-temp-pdf', bytes, suggestedName),
   listHistory: (): Promise<HistoryEntry[]> => ipcRenderer.invoke('list-history'),
   deleteHistoryEntry: (cacheKey: string): Promise<void> => ipcRenderer.invoke('delete-history-entry', cacheKey),
+  renameHistoryEntry: (cacheKey: string, newName: string): Promise<void> =>
+    ipcRenderer.invoke('rename-history-entry', cacheKey, newName),
   checkHomrAvailable: (): Promise<boolean> => ipcRenderer.invoke('check-homr-available'),
   convertPdfToMusicXmlViaHomr: (pdfPath: string, pngPages: Uint8Array[]): Promise<ConvertPdfResponse> =>
     ipcRenderer.invoke('convert-pdf-to-musicxml-via-homr', pdfPath, pngPages),
