@@ -751,13 +751,17 @@ collapseScoreButton.addEventListener('click', async () => {
   if (!scoreHidden) await reflowScore()
 })
 
-collapseSidebarButton.addEventListener('click', () => {
+collapseSidebarButton.addEventListener('click', async () => {
   sidebarHidden = !sidebarHidden
   if (sidebarHidden) scoreHidden = false
   appLayout.classList.toggle('hide-sidebar', sidebarHidden)
   appLayout.classList.toggle('hide-score', scoreHidden)
   updateCollapseButtons()
   if (!sidebarHidden) setupPianoRoll()
+  // The score panel's width just changed (wider with the sidebar gone, back to normal once it
+  // returns) either way — without this, the score stays rendered at its old, now-wrong width and
+  // the newly-freed space next to it just sits empty instead of the notation actually filling it.
+  await reflowScore()
 })
 
 // Toggles the ドレミ overlay on the score, like swapping between a labeled and an unlabeled copy
