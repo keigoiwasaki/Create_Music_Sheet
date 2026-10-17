@@ -683,7 +683,7 @@
             <select id="history-select"><option value="">履歴(選択してください)</option></select>
           </div>
           <div class="sidebar-row button-row">
-            <button id="history-rename-button" disabled title="選択した履歴の名前を変更">リネーム</button>
+            <button id="history-rename-button" disabled title="選択した履歴の名前を変更">名称変更</button>
             <button id="history-delete-button" disabled title="選択した履歴を削除">削除</button>
           </div>
         </div>
@@ -738,6 +738,18 @@
         <div class="modal-buttons">
           <button id="password-cancel-button" type="button" class="modal-button-secondary">キャンセル</button>
           <button id="password-submit-button" type="button" class="modal-button-primary">開く</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="rename-modal" class="modal-overlay" hidden>
+      <div class="modal-box">
+        <div class="modal-title">名称変更</div>
+        <div class="modal-message">新しい名前を入力してください。</div>
+        <input id="rename-input" type="text" class="modal-input" autocomplete="off" />
+        <div class="modal-buttons">
+          <button id="rename-cancel-button" type="button" class="modal-button-secondary">キャンセル</button>
+          <button id="rename-submit-button" type="button" class="modal-button-primary">変更</button>
         </div>
       </div>
     </div>

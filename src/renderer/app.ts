@@ -23,6 +23,10 @@ const passwordInput = document.getElementById('password-input') as HTMLInputElem
 const passwordError = document.getElementById('password-error') as HTMLElement
 const passwordCancelButton = document.getElementById('password-cancel-button') as HTMLButtonElement
 const passwordSubmitButton = document.getElementById('password-submit-button') as HTMLButtonElement
+const renameModal = document.getElementById('rename-modal') as HTMLElement
+const renameInput = document.getElementById('rename-input') as HTMLInputElement
+const renameCancelButton = document.getElementById('rename-cancel-button') as HTMLButtonElement
+const renameSubmitButton = document.getElementById('rename-submit-button') as HTMLButtonElement
 const historySelect = document.getElementById('history-select') as HTMLSelectElement
 const historyRenameButton = document.getElementById('history-rename-button') as HTMLButtonElement
 const historyDeleteButton = document.getElementById('history-delete-button') as HTMLButtonElement
@@ -486,6 +490,39 @@ function promptForPassword(attemptFailed: boolean): Promise<string | null> {
   })
 }
 
+/** Resolves the new name, or `null` if the user canceled — same modal-as-promise shape as `promptForPassword`. */
+function promptForRename(currentName: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    renameInput.value = currentName
+    renameModal.hidden = false
+    renameInput.focus()
+    renameInput.select()
+
+    const cleanup = (): void => {
+      renameModal.hidden = true
+      renameSubmitButton.removeEventListener('click', onSubmit)
+      renameCancelButton.removeEventListener('click', onCancel)
+      renameInput.removeEventListener('keydown', onKeydown)
+    }
+    const onSubmit = (): void => {
+      cleanup()
+      resolve(renameInput.value)
+    }
+    const onCancel = (): void => {
+      cleanup()
+      resolve(null)
+    }
+    const onKeydown = (event: KeyboardEvent): void => {
+      if (event.key === 'Enter') onSubmit()
+      else if (event.key === 'Escape') onCancel()
+    }
+
+    renameSubmitButton.addEventListener('click', onSubmit)
+    renameCancelButton.addEventListener('click', onCancel)
+    renameInput.addEventListener('keydown', onKeydown)
+  })
+}
+
 async function convertViaAudiveris(effectivePdfPath: string): Promise<ConvertPdfResponse> {
   setStatus('楽譜を認識しています(Audiveris)...')
   return window.musicSheet.convertPdfToMusicXml(effectivePdfPath)
@@ -580,7 +617,7 @@ historyRenameButton.addEventListener('click', async () => {
   const entry = entries.find((e: HistoryEntry) => e.cacheKey === cacheKey)
   if (!entry) return
 
-  const newName = window.prompt('新しい名前を入力してください', entry.originalFileName)?.trim()
+  const newName = (await promptForRename(entry.originalFileName))?.trim()
   if (!newName || newName === entry.originalFileName) return
 
   await window.musicSheet.renameHistoryEntry(cacheKey, newName)
