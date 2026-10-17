@@ -107,6 +107,39 @@ export const VOICE_PRESETS: VoicePreset[] = [
     filterFloorHz: 700,
   },
   {
+    // Fallback envelope only — used transiently before this voice's real samples finish loading
+    // (see `scheduleSampledPianoNote` / `loadPianoSamples`). Same shape as the 'piano' preset.
+    id: 'piano-soft',
+    label: 'ピアノ(ソフト)',
+    harmonics: buildHammerStruckHarmonics(14),
+    attack: 0.006,
+    punch: 0.1,
+    settleFactor: 0.4,
+    sustainFactor: 0.3,
+    ringScale: 1.15,
+    ringMin: 0.25,
+    ringMax: 2.2,
+    brightnessScale: 6,
+    filterEndScale: 1.5,
+    filterFloorHz: 700,
+  },
+  {
+    // Fallback envelope only — see 'piano-soft' above.
+    id: 'piano-bright',
+    label: 'ピアノ(ブリリアント)',
+    harmonics: buildHammerStruckHarmonics(14),
+    attack: 0.006,
+    punch: 0.1,
+    settleFactor: 0.4,
+    sustainFactor: 0.3,
+    ringScale: 1.15,
+    ringMin: 0.25,
+    ringMax: 2.2,
+    brightnessScale: 6,
+    filterEndScale: 1.5,
+    filterFloorHz: 700,
+  },
+  {
     id: 'epiano',
     label: 'エレピ',
     harmonics: buildBellLikeHarmonics(11),
@@ -317,11 +350,6 @@ export function schedulePianoNote(
 }
 
 const NOTE_NAMES = ['C', 'Cs', 'D', 'Ds', 'E', 'F', 'Fs', 'G', 'Gs', 'A', 'As', 'B']
-// The bundled recordings (src/renderer/public/piano-samples, see its LICENSE.md for provenance)
-// cover every semitone from C1 to C8 — nearly the full 88-key range, missing only the bottom three
-// keys (A0/A#0/B0), which essentially never appear in piano sheet music.
-const SAMPLE_MIN_MIDI = 24
-const SAMPLE_MAX_MIDI = 108
 
 function midiToSampleName(midi: number): string {
   const name = NOTE_NAMES[((midi % 12) + 12) % 12]
@@ -329,34 +357,75 @@ function midiToSampleName(midi: number): string {
   return `${name}${octave}`
 }
 
-const pianoSampleBuffers = new Map<number, AudioBuffer>()
+/** Every semitone, C1 through C8 — the range `src/renderer/public/piano-samples` actually covers. */
+function fullChromaticRange(minMidi: number, maxMidi: number): number[] {
+  return Array.from({ length: maxMidi - minMidi + 1 }, (_, i) => minMidi + i)
+}
+
+/**
+ * The Salamander Grand Piano's own sparse sampling pattern (src/renderer/public/piano-samples-
+ * salamander, see its LICENSE.md): real recordings only every major third (C, D#, F#, A per
+ * octave) from A0 through C8 — everything in between is pitch-shifted from the nearest one via
+ * `playbackRate` in `scheduleSampledPianoNote`, same as any out-of-range note in the full-
+ * chromatic set above.
+ */
+function salamanderSparseRange(): number[] {
+  const midi = [21] // A0
+  for (let octave = 1; octave <= 7; octave++) {
+    const c = 12 * (octave + 1) // C1 = 24, C2 = 36, ...
+    midi.push(c, c + 3, c + 6, c + 9) // C, D#, F#, A
+  }
+  midi.push(108) // C8
+  return midi
+}
+
+interface SampledPianoSource {
+  /** Matches a `VoicePreset.id` — selects which recordings `AudioPlayer` reaches for. */
+  voiceId: string
+  /** Relative to the app root (served from `src/renderer/public/`). */
+  baseUrl: string
+  availableMidi: number[]
+}
+
+const SAMPLED_PIANO_SOURCES: SampledPianoSource[] = [
+  { voiceId: 'piano', baseUrl: 'piano-samples', availableMidi: fullChromaticRange(24, 108) },
+  { voiceId: 'piano-soft', baseUrl: 'piano-samples-salamander/soft', availableMidi: salamanderSparseRange() },
+  { voiceId: 'piano-bright', baseUrl: 'piano-samples-salamander/bright', availableMidi: salamanderSparseRange() },
+]
+
+const sampleBuffersByVoice = new Map<string, Map<number, AudioBuffer>>()
 let pianoSamplesPromise: Promise<void> | null = null
 
 /**
- * Loads the bundled real-piano recordings in the background, decoded once and cached here for the
- * lifetime of the renderer process. Call this once, early (e.g. alongside `warmUpAudioContext` at
- * app startup) — `AudioPlayer.play()` never awaits it: a note whose sample has already finished
- * loading plays from the recording, and any note still missing (only possible for a click in the
- * first second or two after the app window opens) transparently falls back to the synthesized tone
- * (`schedulePianoNote`) for just that one call.
+ * Loads every sampled-piano voice's bundled real recordings in the background, decoded once and
+ * cached here for the lifetime of the renderer process. Call this once, early (e.g. alongside
+ * `warmUpAudioContext` at app startup) — `AudioPlayer.play()` never awaits it: a note whose sample
+ * has already finished loading plays from the recording, and any note still missing (only possible
+ * for a click in the first second or two after the app window opens) transparently falls back to
+ * the synthesized tone (`schedulePianoNote`) for just that one call.
  */
 export function loadPianoSamples(): Promise<void> {
   if (pianoSamplesPromise) return pianoSamplesPromise
   pianoSamplesPromise = (async () => {
     const ctx = new AudioContext()
     try {
-      const midiNumbers = Array.from({ length: SAMPLE_MAX_MIDI - SAMPLE_MIN_MIDI + 1 }, (_, i) => SAMPLE_MIN_MIDI + i)
       await Promise.all(
-        midiNumbers.map(async (midi) => {
-          try {
-            const response = await fetch(`piano-samples/${midiToSampleName(midi)}.mp3`)
-            if (!response.ok) return
-            const arrayBuffer = await response.arrayBuffer()
-            const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
-            pianoSampleBuffers.set(midi, audioBuffer)
-          } catch (err) {
-            console.warn('Failed to load piano sample for midi', midi, err)
-          }
+        SAMPLED_PIANO_SOURCES.map(async (source) => {
+          const buffers = new Map<number, AudioBuffer>()
+          sampleBuffersByVoice.set(source.voiceId, buffers)
+          await Promise.all(
+            source.availableMidi.map(async (midi) => {
+              try {
+                const response = await fetch(`${source.baseUrl}/${midiToSampleName(midi)}.mp3`)
+                if (!response.ok) return
+                const arrayBuffer = await response.arrayBuffer()
+                const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+                buffers.set(midi, audioBuffer)
+              } catch (err) {
+                console.warn('Failed to load piano sample', source.voiceId, midi, err)
+              }
+            })
+          )
         })
       )
     } finally {
@@ -366,12 +435,28 @@ export function loadPianoSamples(): Promise<void> {
   return pianoSamplesPromise
 }
 
+/** The closest actually-recorded note to `targetMidi` among `buffers`' keys (exact match whenever
+ * the voice's source is fully chromatic there — see `SAMPLED_PIANO_SOURCES`). */
+function findNearestSampleMidi(targetMidi: number, buffers: Map<number, AudioBuffer>): number {
+  let best = -Infinity
+  let bestDist = Infinity
+  for (const midi of buffers.keys()) {
+    const dist = Math.abs(midi - targetMidi)
+    if (dist < bestDist) {
+      best = midi
+      bestDist = dist
+    }
+  }
+  return best
+}
+
 /**
  * Schedules one note as playback of a real recorded piano sample instead of synthesis — see
- * `schedulePianoNote` for the synthesized fallback used by every other voice preset (and by piano
- * itself until its samples finish loading). `buffer` is an exact recording for `note.midi` only
- * when it falls in the bundled C1–C8 range; outside that (rare), the nearest edge sample is pitch-
- * shifted via `playbackRate` rather than left silent.
+ * `schedulePianoNote` for the synthesized fallback used by every non-piano voice preset (and by a
+ * sampled-piano voice itself until its samples finish loading). `buffer` is an exact recording for
+ * `note.midi` only when the voice's source actually has that note recorded; otherwise (either
+ * genuinely out of range, or one of the gaps in a sparsely-sampled source like Salamander's) the
+ * nearest recorded note is pitch-shifted via `playbackRate` rather than left silent.
  */
 function scheduleSampledPianoNote(
   ctx: BaseAudioContext,
@@ -515,14 +600,17 @@ export class AudioPlayer {
     for (let i = startIndex; i < end; i++) {
       const note = notes[i]
       try {
-        // Real recordings only exist for the piano voice; every other preset keeps its synthesized
-        // tone. Even for piano, a note falls back to synthesis if its sample hasn't finished
-        // loading yet (only possible within the first second or two after app startup).
-        const sampleMidi = Math.min(SAMPLE_MAX_MIDI, Math.max(SAMPLE_MIN_MIDI, Math.round(note.midi)))
-        const buffer = this.voice.id === 'piano' ? pianoSampleBuffers.get(sampleMidi) : undefined
-        const node = buffer
-          ? scheduleSampledPianoNote(ctx, destinations, buffer, note, sampleMidi, this.startedAt)
-          : schedulePianoNote(ctx, destinations, this.wave!, note, this.startedAt, this.voice)
+        // Real recordings only exist for sampled-piano voices; every other preset keeps its
+        // synthesized tone. Even for those, a note falls back to synthesis if its voice's samples
+        // haven't finished loading yet (only possible within the first second or two after app
+        // startup) or that voice simply has no recordings loaded at all (empty/missing map).
+        const buffers = sampleBuffersByVoice.get(this.voice.id)
+        const sampleMidi = buffers && buffers.size > 0 ? findNearestSampleMidi(Math.round(note.midi), buffers) : null
+        const buffer = sampleMidi !== null ? buffers!.get(sampleMidi) : undefined
+        const node =
+          buffer && sampleMidi !== null
+            ? scheduleSampledPianoNote(ctx, destinations, buffer, note, sampleMidi, this.startedAt)
+            : schedulePianoNote(ctx, destinations, this.wave!, note, this.startedAt, this.voice)
         this.oscillators.push(node)
       } catch (err) {
         // A single malformed note (e.g. bad timing from an OMR/MusicXML edge case) must not
