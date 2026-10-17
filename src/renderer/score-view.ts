@@ -27,7 +27,10 @@ interface NoteheadProvider {
  * first and measured to have NO effect on page count — it scales the page itself along with its
  * content (like zooming a PDF viewer), not how much fits on a fixed physical page. `StaffHeight`
  * shrinks the staff relative to the page, which does reduce page count. */
-const COMPACT_ZOOM = 0.8
+const COMPACT_ZOOM = 0.6
+/** `compactLayout`'s page-margin scale — looser than the system/note-spacing scaling below, so
+ * pages keep visible breathing room top and bottom instead of content running to the edge. */
+const COMPACT_MARGIN_SCALE = 0.7
 
 export class ScoreView {
   private readonly osmd: OpenSheetMusicDisplay
@@ -46,13 +49,16 @@ export class ScoreView {
 
   /**
    * `pageFormat`, e.g. "A4_P", splits rendering into fixed-size pages (for print/PDF export)
-   * instead of one continuous scroll. `compactLayout` tightens page margins/system spacing, drops
-   * the title, shrinks the staff itself (`StaffHeight *= COMPACT_ZOOM`, which — unlike OSMD's own
-   * `zoom`, see `COMPACT_ZOOM`'s doc — actually fits more per physical page), and fits more
-   * measures per line (0.6x OSMD's normal note/measure spacing). Verified against a 125-measure
-   * piece: 18 pages down to 10 with both changes combined, with no notehead/label overlap even in
-   * dense chord passages (pushing `COMPACT_ZOOM` further, to 0.65, saved no additional pages — 0.8
-   * is already past the point of diminishing returns, so there's no reason to shrink further).
+   * instead of one continuous scroll. `compactLayout` drops the title and instrument/part name
+   * (OSMD would otherwise print something like "Instr P1" before the first system — a generic
+   * fallback name from the OMR engine, not meaningful to show), tightens system spacing, keeps a
+   * deliberately looser `COMPACT_MARGIN_SCALE` around the page edges than the rest (content
+   * touching the page edge looked cramped even though it saved room), shrinks the staff itself
+   * (`StaffHeight *= COMPACT_ZOOM` — unlike OSMD's own `zoom`, see `COMPACT_ZOOM`'s doc, this
+   * actually fits more per physical page), and fits more measures per line (same `COMPACT_ZOOM`
+   * on note/measure spacing). Verified against a 125-measure piece: 18 pages down to 11 with all
+   * of this combined (margins were loosened back up afterward, trading a couple of pages for
+   * visible breathing room), with no notehead/label overlap even in dense chord passages.
    * `labelFontScale` is kept in sync with `COMPACT_ZOOM` (see `renderLabels`): the ドレミ labels are
    * our own overlay, not part of OSMD's own rendering, so without this they'd stay full-size over
    * the shrunk staff and look oversized — and could overlap each other, since collision-avoidance
@@ -74,8 +80,9 @@ export class ScoreView {
       const rules = this.osmd.EngravingRules
       rules.StaffHeight *= COMPACT_ZOOM
       rules.RenderTitle = false
-      rules.PageTopMargin *= 0.4
-      rules.PageBottomMargin *= 0.4
+      rules.RenderPartNames = false
+      rules.PageTopMargin *= COMPACT_MARGIN_SCALE
+      rules.PageBottomMargin *= COMPACT_MARGIN_SCALE
       rules.MinSkyBottomDistBetweenSystems *= 0.4
       rules.BetweenStaffDistance *= 0.7
       rules.VoiceSpacingMultiplierVexflow *= 0.6
