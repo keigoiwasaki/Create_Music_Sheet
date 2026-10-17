@@ -159,11 +159,26 @@
       #score-toolbar {
         flex: 0 0 auto;
         display: flex;
-        justify-content: flex-end;
+        align-items: center;
+        justify-content: space-between;
         gap: 8px;
         padding: 8px 18px;
         background: linear-gradient(90deg, var(--purple-800), var(--purple-700));
         box-shadow: 0 1px 4px rgba(46, 16, 101, 0.3);
+      }
+      #score-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #fff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
+      }
+      #score-toolbar-buttons {
+        flex: 0 0 auto;
+        display: flex;
+        gap: 8px;
       }
       #score-scroll {
         position: relative;
@@ -640,8 +655,11 @@
     <div id="app-layout">
       <div id="score-panel">
         <div id="score-toolbar">
-          <button id="toggle-labels-button" type="button" class="top-bar-button" disabled>ドレミを隠す</button>
-          <button id="download-button" type="button" class="top-bar-button" disabled>ダウンロード</button>
+          <span id="score-title"></span>
+          <div id="score-toolbar-buttons">
+            <button id="toggle-labels-button" type="button" class="top-bar-button" disabled>ドレミを隠す</button>
+            <button id="download-button" type="button" class="top-bar-button" disabled>ダウンロード</button>
+          </div>
         </div>
         <div id="score-scroll">
           <div id="score-wrapper" class="score-wrapper">

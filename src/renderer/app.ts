@@ -27,6 +27,7 @@ const historySelect = document.getElementById('history-select') as HTMLSelectEle
 const historyRenameButton = document.getElementById('history-rename-button') as HTMLButtonElement
 const historyDeleteButton = document.getElementById('history-delete-button') as HTMLButtonElement
 const downloadButton = document.getElementById('download-button') as HTMLButtonElement
+const scoreTitleEl = document.getElementById('score-title') as HTMLElement
 const muteRightCheckbox = document.getElementById('mute-right') as HTMLInputElement
 const muteLeftCheckbox = document.getElementById('mute-left') as HTMLInputElement
 const rollShowLabelsCheckbox = document.getElementById('roll-show-labels') as HTMLInputElement
@@ -328,6 +329,8 @@ async function setCurrentPiece(musicXmlText: string | null): Promise<void> {
   } else {
     rollRenderer = null
     labelLayer.classList.remove('labels-ready')
+    currentPdfBaseName = 'score'
+    scoreTitleEl.textContent = ''
   }
 }
 
@@ -356,6 +359,7 @@ async function refreshHistory(selectCacheKey?: string): Promise<void> {
 /** Renders a successful conversion result (fresh or from history) — shared by both entry points. */
 async function loadConvertResult(result: ConvertPdfResult, displayName: string): Promise<void> {
   currentPdfBaseName = displayName.replace(/\.pdf$/i, '')
+  scoreTitleEl.textContent = currentPdfBaseName
   const musicXmlText = await window.musicSheet.readMusicXmlText(result.musicXmlPath)
 
   if (!result.omrPath) {
@@ -581,6 +585,12 @@ historyRenameButton.addEventListener('click', async () => {
 
   await window.musicSheet.renameHistoryEntry(cacheKey, newName)
   await refreshHistory(cacheKey)
+  // Renaming only ever acts on the currently-selected (and therefore currently-displayed) history
+  // entry, so the piece now showing is always the one that was just renamed — keep its title (and
+  // the download filename it feeds) in sync instead of only updating the history dropdown. Strips
+  // a trailing ".pdf" the same way loadConvertResult does, in case the user typed one.
+  currentPdfBaseName = newName.replace(/\.pdf$/i, '')
+  scoreTitleEl.textContent = currentPdfBaseName
   setStatus('名前を変更しました')
 })
 

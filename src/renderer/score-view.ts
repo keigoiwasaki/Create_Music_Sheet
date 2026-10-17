@@ -71,7 +71,11 @@ export class ScoreView {
     this.labelLayer = labelLayer
     this.osmd = new OpenSheetMusicDisplay(container, {
       autoResize: false,
-      drawTitle: true,
+      // The app shows its own title (driven by the file name the user gave the piece, kept in
+      // sync with history renames — see app.ts's `scoreTitle`), not whatever OSMD parses out of
+      // the MusicXML's embedded metadata (often missing, garbled, or just the OMR engine's own
+      // placeholder — unrelated to what the user actually sees in the history list).
+      drawTitle: false,
       pageFormat: options.pageFormat,
     })
     this.osmd.TransposeCalculator = new TransposeCalculator()
