@@ -40,7 +40,9 @@ const speedLabel = document.getElementById('speed-label') as HTMLElement
 const keyShiftSlider = document.getElementById('key-shift') as HTMLInputElement
 const keyShiftLabel = document.getElementById('key-shift-label') as HTMLElement
 const voiceSelect = document.getElementById('voice-select') as HTMLSelectElement
-const statusEl = document.getElementById('status') as HTMLElement
+const progressBar = document.getElementById('progress-bar') as HTMLElement
+const progressBarLabel = document.getElementById('progress-bar-label') as HTMLElement
+const progressBarFill = document.getElementById('progress-bar-fill') as HTMLElement
 const scoreScroll = document.getElementById('score-scroll') as HTMLElement
 const scoreContainer = document.getElementById('score-container') as HTMLElement
 const labelLayer = document.getElementById('label-layer') as HTMLElement
@@ -78,9 +80,37 @@ let rollRenderer: PianoRollRenderer | null = null
 // rather than waiting for a big enough jump). See `autoScrollToPlayhead`.
 let lastAutoScrollTop: number | null = null
 
+/** Matches homr's own "ページ X/Y" progress messages (see src/main/homr.ts) — the only status text
+ * with a real fraction to show as a determinate fill; everything else gets the indeterminate
+ * sliding animation instead of a fill stuck at some made-up width. */
+const PROGRESS_FRACTION_PATTERN = /ページ\s*(\d+)\/(\d+)/
+
 function setStatus(message: string, isError = false): void {
-  statusEl.textContent = message
-  statusEl.classList.toggle('error', isError)
+  if (!message) {
+    progressBar.hidden = true
+    return
+  }
+
+  progressBar.hidden = false
+  progressBarLabel.textContent = message
+  progressBar.classList.toggle('error', isError)
+
+  // Every in-progress message in this app ends with "..." by convention (homr's own page-by-page
+  // messages included) — a plain result/info message ("保存しました", "キャンセルしました") or an
+  // error doesn't, so it gets no bar at all instead of a progress animation that doesn't apply.
+  const isProgressMessage = !isError && message.endsWith('...')
+  progressBar.classList.toggle('in-progress', isProgressMessage)
+
+  const fractionMatch = isProgressMessage ? message.match(PROGRESS_FRACTION_PATTERN) : null
+  if (fractionMatch) {
+    const [, doneStr, totalStr] = fractionMatch
+    const done = Number(doneStr)
+    const total = Number(totalStr)
+    progressBar.classList.remove('indeterminate')
+    progressBarFill.style.width = `${total > 0 ? Math.min(100, (done / total) * 100) : 0}%`
+  } else {
+    progressBar.classList.toggle('indeterminate', isProgressMessage)
+  }
 }
 
 function activeView(): ScoreView | PdfOverlayView {
