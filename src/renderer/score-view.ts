@@ -79,12 +79,16 @@ export class ScoreView {
       pageFormat: options.pageFormat,
     })
     this.osmd.TransposeCalculator = new TransposeCalculator()
+    // Same reasoning as drawTitle above: OSMD would otherwise print the part/instrument name next
+    // to the first system (often a meaningless placeholder like "Instr. P1" from the OMR engine,
+    // not an actual instrument name) — unconditional, not just in compactLayout, since it's just
+    // as meaningless on screen as in an export.
+    this.osmd.EngravingRules.RenderPartNames = false
     if (options.compactLayout) {
       this.labelFontScale = COMPACT_ZOOM
       const rules = this.osmd.EngravingRules
       rules.StaffHeight *= COMPACT_ZOOM
       rules.RenderTitle = false
-      rules.RenderPartNames = false
       rules.PageTopMargin *= COMPACT_MARGIN_SCALE
       rules.PageBottomMargin *= COMPACT_MARGIN_SCALE
       rules.MinSkyBottomDistBetweenSystems *= 0.4
