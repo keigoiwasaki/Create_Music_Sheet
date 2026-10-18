@@ -71,11 +71,11 @@ export class ScoreView {
     this.labelLayer = labelLayer
     this.osmd = new OpenSheetMusicDisplay(container, {
       autoResize: false,
-      // The app shows its own title (driven by the file name the user gave the piece, kept in
-      // sync with history renames — see app.ts's `scoreTitle`), not whatever OSMD parses out of
-      // the MusicXML's embedded metadata (often missing, garbled, or just the OMR engine's own
-      // placeholder — unrelated to what the user actually sees in the history list).
-      drawTitle: false,
+      // Rendered above the first system, like real sheet music — but see `loadAndRender`'s `title`
+      // param: we overwrite OSMD's own parsed text (from the MusicXML's embedded metadata, often
+      // missing, garbled, or just the OMR engine's own placeholder) with the name the user actually
+      // gave the piece, instead of just turning this off.
+      drawTitle: true,
       pageFormat: options.pageFormat,
     })
     this.osmd.TransposeCalculator = new TransposeCalculator()
@@ -98,9 +98,17 @@ export class ScoreView {
     }
   }
 
-  async loadAndRender(content: Uint8Array | string): Promise<void> {
+  /**
+   * `title`, when given, overwrites whatever title OSMD parsed out of the MusicXML's own embedded
+   * metadata (see the constructor's `drawTitle` doc) — the name actually shown in the history list,
+   * kept in sync by passing this on every (re-)render: initial load, reflow, and rename.
+   */
+  async loadAndRender(content: Uint8Array | string, title?: string): Promise<void> {
     const source = typeof content === 'string' ? content : new Blob([content as unknown as BlobPart])
     await this.osmd.load(source)
+    if (title && this.osmd.Sheet?.Title) {
+      this.osmd.Sheet.Title.text = title
+    }
     this.osmd.render()
     if (typeof content === 'string') {
       const tempo = getTempoBpm(content)

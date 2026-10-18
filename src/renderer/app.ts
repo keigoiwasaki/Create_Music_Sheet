@@ -143,7 +143,7 @@ async function reflowScore(): Promise<void> {
     await pdfOverlayView.render(currentPdfBytes, currentSheets, currentChordEvents)
     pdfOverlayView.setTranspose(Number(keyShiftSlider.value))
   } else if (activeMode === 'osmd') {
-    await scoreView.loadAndRender(currentMusicXmlText)
+    await scoreView.loadAndRender(currentMusicXmlText, currentPdfBaseName)
     scoreView.setTranspose(Number(keyShiftSlider.value))
   }
   clearHighlights()
@@ -373,7 +373,7 @@ async function loadConvertResult(result: ConvertPdfResult, displayName: string):
     currentPdfBytes = null
     currentSheets = null
     currentChordEvents = null
-    await scoreView.loadAndRender(musicXmlText)
+    await scoreView.loadAndRender(musicXmlText, currentPdfBaseName)
     scoreView.setTranspose(Number(keyShiftSlider.value))
     downloadButton.disabled = false
     await setCurrentPiece(musicXmlText)
@@ -628,6 +628,9 @@ historyRenameButton.addEventListener('click', async () => {
   // a trailing ".pdf" the same way loadConvertResult does, in case the user typed one.
   currentPdfBaseName = newName.replace(/\.pdf$/i, '')
   scoreTitleEl.textContent = currentPdfBaseName
+  // Also re-renders the score itself so its own first-line title (OSMD's drawTitle, see
+  // score-view.ts) picks up the new name too, not just the toolbar label above it.
+  await reflowScore()
   setStatus('名前を変更しました')
 })
 
