@@ -63,6 +63,8 @@ export interface MusicSheetApi {
   /** Previously-converted pieces, newest first. */
   listHistory(): Promise<HistoryEntry[]>
   deleteHistoryEntry(cacheKey: string): Promise<void>
+  /** Changes a history entry's display name (does not touch the cached PDF/MusicXML files themselves). */
+  renameHistoryEntry(cacheKey: string, newName: string): Promise<void>
   /** Whether the experimental homr OMR engine is installed and runnable. */
   checkHomrAvailable(): Promise<boolean>
   /**

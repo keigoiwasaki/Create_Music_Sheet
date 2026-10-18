@@ -22,6 +22,16 @@ interface NoteheadProvider {
   vfnoteIndex: number
 }
 
+/** Scale used by `compactLayout` for both `EngravingRules.StaffHeight` and the ドレミ label font —
+ * see the ScoreView constructor doc for how this was tuned. Note: OSMD's own `zoom` was tried
+ * first and measured to have NO effect on page count — it scales the page itself along with its
+ * content (like zooming a PDF viewer), not how much fits on a fixed physical page. `StaffHeight`
+ * shrinks the staff relative to the page, which does reduce page count. */
+const COMPACT_ZOOM = 0.6
+/** `compactLayout`'s page-margin scale — looser than the system/note-spacing scaling below, so
+ * pages keep visible breathing room top and bottom instead of content running to the edge. */
+const COMPACT_MARGIN_SCALE = 0.7
+
 export class ScoreView {
   private readonly osmd: OpenSheetMusicDisplay
   private readonly labelLayer: HTMLElement
@@ -33,36 +43,74 @@ export class ScoreView {
    * uses, read from the same `<sound tempo>` detection `musicxml-notes.ts` uses for playback, so
    * the two can never drift apart even if OSMD's own internal tempo detection differs. */
   private secondsPerWholeNote = (60 / 120) * 4
+  /** Matches `COMPACT_ZOOM` in `compactLayout` mode, so the ドレミ overlay (ours, not OSMD's)
+   * shrinks along with the notation instead of staying full-size — see the constructor doc. */
+  private labelFontScale = 1
 
   /**
    * `pageFormat`, e.g. "A4_P", splits rendering into fixed-size pages (for print/PDF export)
-   * instead of one continuous scroll. `compactLayout` tightens page margins/system spacing and
-   * drops the title to use less wasted space — but deliberately leaves note/measure spacing at
-   * OSMD's normal density: compressing that (tried down to 0.2x) crammed enough measures per line
-   * to make noteheads and labels overlap and become hard to read, which matters more than page count.
+   * instead of one continuous scroll. `compactLayout` drops the title and instrument/part name
+   * (OSMD would otherwise print something like "Instr P1" before the first system — a generic
+   * fallback name from the OMR engine, not meaningful to show), tightens system spacing, keeps a
+   * deliberately looser `COMPACT_MARGIN_SCALE` around the page edges than the rest (content
+   * touching the page edge looked cramped even though it saved room), shrinks the staff itself
+   * (`StaffHeight *= COMPACT_ZOOM` — unlike OSMD's own `zoom`, see `COMPACT_ZOOM`'s doc, this
+   * actually fits more per physical page), and fits more measures per line (same `COMPACT_ZOOM`
+   * on note/measure spacing). Verified against a 125-measure piece: 18 pages down to 11 with all
+   * of this combined (margins were loosened back up afterward, trading a couple of pages for
+   * visible breathing room), with no notehead/label overlap even in dense chord passages.
+   * `labelFontScale` is kept in sync with `COMPACT_ZOOM` (see `renderLabels`): the ドレミ labels are
+   * our own overlay, not part of OSMD's own rendering, so without this they'd stay full-size over
+   * the shrunk staff and look oversized — and could overlap each other, since collision-avoidance
+   * in label-layout.ts sizes its boxes from this same scale. An earlier, far more aggressive
+   * spacing-only attempt (0.2x, no staff shrink) did overlap and was reverted; this combination
+   * sits well clear of that.
    */
   constructor(container: HTMLElement, labelLayer: HTMLElement, options: { pageFormat?: string; compactLayout?: boolean } = {}) {
     this.container = container
     this.labelLayer = labelLayer
     this.osmd = new OpenSheetMusicDisplay(container, {
       autoResize: false,
+      // Rendered above the first system, like real sheet music — but see `loadAndRender`'s `title`
+      // param: we overwrite OSMD's own parsed text (from the MusicXML's embedded metadata, often
+      // missing, garbled, or just the OMR engine's own placeholder) with the name the user actually
+      // gave the piece, instead of just turning this off.
       drawTitle: true,
       pageFormat: options.pageFormat,
     })
     this.osmd.TransposeCalculator = new TransposeCalculator()
+    // Same reasoning as drawTitle above: OSMD would otherwise print the part/instrument name next
+    // to the first system (often a meaningless placeholder like "Instr. P1" from the OMR engine,
+    // not an actual instrument name) — unconditional, not just in compactLayout, since it's just
+    // as meaningless on screen as in an export.
+    this.osmd.EngravingRules.RenderPartNames = false
     if (options.compactLayout) {
+      this.labelFontScale = COMPACT_ZOOM
       const rules = this.osmd.EngravingRules
-      rules.RenderTitle = false
-      rules.PageTopMargin *= 0.4
-      rules.PageBottomMargin *= 0.4
+      rules.StaffHeight *= COMPACT_ZOOM
+      // Title stays on (see the constructor's drawTitle doc) — only the first page pays for it, so
+      // the page-count cost is minor and the exported PDF should show the piece's name same as the
+      // on-screen view does.
+      rules.PageTopMargin *= COMPACT_MARGIN_SCALE
+      rules.PageBottomMargin *= COMPACT_MARGIN_SCALE
       rules.MinSkyBottomDistBetweenSystems *= 0.4
       rules.BetweenStaffDistance *= 0.7
+      rules.VoiceSpacingMultiplierVexflow *= 0.6
+      rules.MinNoteDistance *= 0.6
     }
   }
 
-  async loadAndRender(content: Uint8Array | string): Promise<void> {
+  /**
+   * `title`, when given, overwrites whatever title OSMD parsed out of the MusicXML's own embedded
+   * metadata (see the constructor's `drawTitle` doc) — the name actually shown in the history list,
+   * kept in sync by passing this on every (re-)render: initial load, reflow, and rename.
+   */
+  async loadAndRender(content: Uint8Array | string, title?: string): Promise<void> {
     const source = typeof content === 'string' ? content : new Blob([content as unknown as BlobPart])
     await this.osmd.load(source)
+    if (title && this.osmd.Sheet?.Title) {
+      this.osmd.Sheet.Title.text = title
+    }
     this.osmd.render()
     if (typeof content === 'string') {
       const tempo = getTempoBpm(content)
@@ -110,7 +158,7 @@ export class ScoreView {
       }
     }
 
-    const { placements, elements } = placeLabelsAvoidingOverlap(candidates, this.labelLayer)
+    const { placements, elements } = placeLabelsAvoidingOverlap(candidates, this.labelLayer, this.labelFontScale)
     this.placements = placements
     this.highlightEntries = buildHighlightEntries(placements, elements)
   }

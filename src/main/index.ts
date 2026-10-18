@@ -4,7 +4,16 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { cleanupOmrOutput, convertPdfToMusicXml, readMusicXmlText, readOmrSheets, readScoreFile } from './omr'
 import { checkHomrAvailable, cleanupHomrOutput, convertPagesToMusicXmlViaHomr } from './homr'
-import { buildCacheKey, deleteCacheEntry, hashFile, listCacheEntries, readCacheEntry, resolveCachePath, writeCacheEntry } from './cache'
+import {
+  buildCacheKey,
+  deleteCacheEntry,
+  hashFile,
+  listCacheEntries,
+  readCacheEntry,
+  renameCacheEntry,
+  resolveCachePath,
+  writeCacheEntry,
+} from './cache'
 import type { ConvertPdfResponse, HistoryEntry } from '../shared/types'
 
 function createWindow(): void {
@@ -125,6 +134,10 @@ ipcMain.handle('list-history', async (): Promise<HistoryEntry[]> => {
 
 ipcMain.handle('delete-history-entry', async (_event, cacheKey: string) => {
   await deleteCacheEntry(cacheKey)
+})
+
+ipcMain.handle('rename-history-entry', async (_event, cacheKey: string, newName: string) => {
+  await renameCacheEntry(cacheKey, newName)
 })
 
 ipcMain.handle('read-score-file', async (_event, path: string) => {

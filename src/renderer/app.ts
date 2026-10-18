@@ -18,16 +18,20 @@ const collapseSidebarButton = document.getElementById('collapse-sidebar-button')
 const toggleLabelsButton = document.getElementById('toggle-labels-button') as HTMLButtonElement
 const sidebar = document.getElementById('sidebar') as HTMLElement
 const openButton = document.getElementById('open-button') as HTMLButtonElement
-const engineSelect = document.getElementById('engine-select') as HTMLSelectElement
-const engineHint = document.getElementById('engine-hint') as HTMLElement
 const passwordModal = document.getElementById('password-modal') as HTMLElement
 const passwordInput = document.getElementById('password-input') as HTMLInputElement
 const passwordError = document.getElementById('password-error') as HTMLElement
 const passwordCancelButton = document.getElementById('password-cancel-button') as HTMLButtonElement
 const passwordSubmitButton = document.getElementById('password-submit-button') as HTMLButtonElement
+const renameModal = document.getElementById('rename-modal') as HTMLElement
+const renameInput = document.getElementById('rename-input') as HTMLInputElement
+const renameCancelButton = document.getElementById('rename-cancel-button') as HTMLButtonElement
+const renameSubmitButton = document.getElementById('rename-submit-button') as HTMLButtonElement
 const historySelect = document.getElementById('history-select') as HTMLSelectElement
+const historyRenameButton = document.getElementById('history-rename-button') as HTMLButtonElement
 const historyDeleteButton = document.getElementById('history-delete-button') as HTMLButtonElement
 const downloadButton = document.getElementById('download-button') as HTMLButtonElement
+const scoreTitleEl = document.getElementById('score-title') as HTMLElement
 const muteRightCheckbox = document.getElementById('mute-right') as HTMLInputElement
 const muteLeftCheckbox = document.getElementById('mute-left') as HTMLInputElement
 const rollShowLabelsCheckbox = document.getElementById('roll-show-labels') as HTMLInputElement
@@ -36,7 +40,9 @@ const speedLabel = document.getElementById('speed-label') as HTMLElement
 const keyShiftSlider = document.getElementById('key-shift') as HTMLInputElement
 const keyShiftLabel = document.getElementById('key-shift-label') as HTMLElement
 const voiceSelect = document.getElementById('voice-select') as HTMLSelectElement
-const statusEl = document.getElementById('status') as HTMLElement
+const progressBar = document.getElementById('progress-bar') as HTMLElement
+const progressBarLabel = document.getElementById('progress-bar-label') as HTMLElement
+const progressBarFill = document.getElementById('progress-bar-fill') as HTMLElement
 const scoreScroll = document.getElementById('score-scroll') as HTMLElement
 const scoreContainer = document.getElementById('score-container') as HTMLElement
 const labelLayer = document.getElementById('label-layer') as HTMLElement
@@ -74,9 +80,37 @@ let rollRenderer: PianoRollRenderer | null = null
 // rather than waiting for a big enough jump). See `autoScrollToPlayhead`.
 let lastAutoScrollTop: number | null = null
 
+/** Matches homr's own "ページ X/Y" progress messages (see src/main/homr.ts) — the only status text
+ * with a real fraction to show as a determinate fill; everything else gets the indeterminate
+ * sliding animation instead of a fill stuck at some made-up width. */
+const PROGRESS_FRACTION_PATTERN = /ページ\s*(\d+)\/(\d+)/
+
 function setStatus(message: string, isError = false): void {
-  statusEl.textContent = message
-  statusEl.classList.toggle('error', isError)
+  if (!message) {
+    progressBar.hidden = true
+    return
+  }
+
+  progressBar.hidden = false
+  progressBarLabel.textContent = message
+  progressBar.classList.toggle('error', isError)
+
+  // Every in-progress message in this app ends with "..." by convention (homr's own page-by-page
+  // messages included) — a plain result/info message ("保存しました", "キャンセルしました") or an
+  // error doesn't, so it gets no bar at all instead of a progress animation that doesn't apply.
+  const isProgressMessage = !isError && message.endsWith('...')
+  progressBar.classList.toggle('in-progress', isProgressMessage)
+
+  const fractionMatch = isProgressMessage ? message.match(PROGRESS_FRACTION_PATTERN) : null
+  if (fractionMatch) {
+    const [, doneStr, totalStr] = fractionMatch
+    const done = Number(doneStr)
+    const total = Number(totalStr)
+    progressBar.classList.remove('indeterminate')
+    progressBarFill.style.width = `${total > 0 ? Math.min(100, (done / total) * 100) : 0}%`
+  } else {
+    progressBar.classList.toggle('indeterminate', isProgressMessage)
+  }
 }
 
 function activeView(): ScoreView | PdfOverlayView {
@@ -113,7 +147,7 @@ async function buildExportPdf(transpose: number): Promise<Uint8Array> {
 
   try {
     const view = new ScoreView(container, tempLabelLayer, { pageFormat: 'A4_P', compactLayout: true })
-    await view.loadAndRender(currentMusicXmlText)
+    await view.loadAndRender(currentMusicXmlText, currentPdfBaseName)
     view.setTranspose(transpose)
     return await exportOsmdAsPdf(container, view.getPlacements())
   } finally {
@@ -139,7 +173,7 @@ async function reflowScore(): Promise<void> {
     await pdfOverlayView.render(currentPdfBytes, currentSheets, currentChordEvents)
     pdfOverlayView.setTranspose(Number(keyShiftSlider.value))
   } else if (activeMode === 'osmd') {
-    await scoreView.loadAndRender(currentMusicXmlText)
+    await scoreView.loadAndRender(currentMusicXmlText, currentPdfBaseName)
     scoreView.setTranspose(Number(keyShiftSlider.value))
   }
   clearHighlights()
@@ -329,6 +363,8 @@ async function setCurrentPiece(musicXmlText: string | null): Promise<void> {
   } else {
     rollRenderer = null
     labelLayer.classList.remove('labels-ready')
+    currentPdfBaseName = 'score'
+    scoreTitleEl.textContent = ''
   }
 }
 
@@ -350,12 +386,14 @@ async function refreshHistory(selectCacheKey?: string): Promise<void> {
   }
 
   if (selectCacheKey) historySelect.value = selectCacheKey
+  historyRenameButton.disabled = !historySelect.value
   historyDeleteButton.disabled = !historySelect.value
 }
 
 /** Renders a successful conversion result (fresh or from history) — shared by both entry points. */
 async function loadConvertResult(result: ConvertPdfResult, displayName: string): Promise<void> {
   currentPdfBaseName = displayName.replace(/\.pdf$/i, '')
+  scoreTitleEl.textContent = currentPdfBaseName
   const musicXmlText = await window.musicSheet.readMusicXmlText(result.musicXmlPath)
 
   if (!result.omrPath) {
@@ -365,7 +403,7 @@ async function loadConvertResult(result: ConvertPdfResult, displayName: string):
     currentPdfBytes = null
     currentSheets = null
     currentChordEvents = null
-    await scoreView.loadAndRender(musicXmlText)
+    await scoreView.loadAndRender(musicXmlText, currentPdfBaseName)
     scoreView.setTranspose(Number(keyShiftSlider.value))
     downloadButton.disabled = false
     await setCurrentPiece(musicXmlText)
@@ -395,10 +433,6 @@ async function loadConvertResult(result: ConvertPdfResult, displayName: string):
 
 window.musicSheet.onOmrProgress((message) => {
   setStatus(message)
-})
-
-engineSelect.addEventListener('change', () => {
-  engineHint.hidden = engineSelect.value !== 'homr'
 })
 
 speedSlider.addEventListener('input', () => {
@@ -486,6 +520,39 @@ function promptForPassword(attemptFailed: boolean): Promise<string | null> {
   })
 }
 
+/** Resolves the new name, or `null` if the user canceled — same modal-as-promise shape as `promptForPassword`. */
+function promptForRename(currentName: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    renameInput.value = currentName
+    renameModal.hidden = false
+    renameInput.focus()
+    renameInput.select()
+
+    const cleanup = (): void => {
+      renameModal.hidden = true
+      renameSubmitButton.removeEventListener('click', onSubmit)
+      renameCancelButton.removeEventListener('click', onCancel)
+      renameInput.removeEventListener('keydown', onKeydown)
+    }
+    const onSubmit = (): void => {
+      cleanup()
+      resolve(renameInput.value)
+    }
+    const onCancel = (): void => {
+      cleanup()
+      resolve(null)
+    }
+    const onKeydown = (event: KeyboardEvent): void => {
+      if (event.key === 'Enter') onSubmit()
+      else if (event.key === 'Escape') onCancel()
+    }
+
+    renameSubmitButton.addEventListener('click', onSubmit)
+    renameCancelButton.addEventListener('click', onCancel)
+    renameInput.addEventListener('keydown', onKeydown)
+  })
+}
+
 async function convertViaAudiveris(effectivePdfPath: string): Promise<ConvertPdfResponse> {
   setStatus('楽譜を認識しています(Audiveris)...')
   return window.musicSheet.convertPdfToMusicXml(effectivePdfPath)
@@ -532,8 +599,9 @@ openButton.addEventListener('click', async () => {
     // PDF instead of the original, since that's the one it can actually read.
     const effectivePdfPath = bytesToConvert === originalBytes ? pdfPath : await window.musicSheet.writeTempPdf(bytesToConvert, fileName)
 
-    const result =
-      engineSelect.value === 'homr' ? await convertViaHomr(effectivePdfPath, bytesToConvert) : await convertViaAudiveris(effectivePdfPath)
+    // homr-only for now — Audiveris support (convertViaAudiveris) is kept in place, not wired up,
+    // in case engine choice comes back later.
+    const result = await convertViaHomr(effectivePdfPath, bytesToConvert)
     if (!result) return // already reported (not-available / canceled) inside the helper
     if (!result.ok) {
       setStatus(result.message, true)
@@ -551,6 +619,7 @@ openButton.addEventListener('click', async () => {
 
 historySelect.addEventListener('change', async () => {
   const cacheKey = historySelect.value
+  historyRenameButton.disabled = !cacheKey
   historyDeleteButton.disabled = !cacheKey
   if (!cacheKey) return
 
@@ -569,6 +638,30 @@ historySelect.addEventListener('change', async () => {
   } catch (err) {
     setStatus(`エラー: ${(err as Error).message}`, true)
   }
+})
+
+historyRenameButton.addEventListener('click', async () => {
+  const cacheKey = historySelect.value
+  if (!cacheKey) return
+  const entries = await window.musicSheet.listHistory()
+  const entry = entries.find((e: HistoryEntry) => e.cacheKey === cacheKey)
+  if (!entry) return
+
+  const newName = (await promptForRename(entry.originalFileName))?.trim()
+  if (!newName || newName === entry.originalFileName) return
+
+  await window.musicSheet.renameHistoryEntry(cacheKey, newName)
+  await refreshHistory(cacheKey)
+  // Renaming only ever acts on the currently-selected (and therefore currently-displayed) history
+  // entry, so the piece now showing is always the one that was just renamed — keep its title (and
+  // the download filename it feeds) in sync instead of only updating the history dropdown. Strips
+  // a trailing ".pdf" the same way loadConvertResult does, in case the user typed one.
+  currentPdfBaseName = newName.replace(/\.pdf$/i, '')
+  scoreTitleEl.textContent = currentPdfBaseName
+  // Also re-renders the score itself so its own first-line title (OSMD's drawTitle, see
+  // score-view.ts) picks up the new name too, not just the toolbar label above it.
+  await reflowScore()
+  setStatus('名前を変更しました')
 })
 
 historyDeleteButton.addEventListener('click', async () => {
@@ -751,13 +844,17 @@ collapseScoreButton.addEventListener('click', async () => {
   if (!scoreHidden) await reflowScore()
 })
 
-collapseSidebarButton.addEventListener('click', () => {
+collapseSidebarButton.addEventListener('click', async () => {
   sidebarHidden = !sidebarHidden
   if (sidebarHidden) scoreHidden = false
   appLayout.classList.toggle('hide-sidebar', sidebarHidden)
   appLayout.classList.toggle('hide-score', scoreHidden)
   updateCollapseButtons()
   if (!sidebarHidden) setupPianoRoll()
+  // The score panel's width just changed (wider with the sidebar gone, back to normal once it
+  // returns) either way — without this, the score stays rendered at its old, now-wrong width and
+  // the newly-freed space next to it just sits empty instead of the notation actually filling it.
+  await reflowScore()
 })
 
 // Toggles the ドレミ overlay on the score, like swapping between a labeled and an unlabeled copy
