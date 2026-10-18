@@ -88,7 +88,9 @@ export class ScoreView {
       this.labelFontScale = COMPACT_ZOOM
       const rules = this.osmd.EngravingRules
       rules.StaffHeight *= COMPACT_ZOOM
-      rules.RenderTitle = false
+      // Title stays on (see the constructor's drawTitle doc) — only the first page pays for it, so
+      // the page-count cost is minor and the exported PDF should show the piece's name same as the
+      // on-screen view does.
       rules.PageTopMargin *= COMPACT_MARGIN_SCALE
       rules.PageBottomMargin *= COMPACT_MARGIN_SCALE
       rules.MinSkyBottomDistBetweenSystems *= 0.4

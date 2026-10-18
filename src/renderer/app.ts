@@ -117,7 +117,7 @@ async function buildExportPdf(transpose: number): Promise<Uint8Array> {
 
   try {
     const view = new ScoreView(container, tempLabelLayer, { pageFormat: 'A4_P', compactLayout: true })
-    await view.loadAndRender(currentMusicXmlText)
+    await view.loadAndRender(currentMusicXmlText, currentPdfBaseName)
     view.setTranspose(transpose)
     return await exportOsmdAsPdf(container, view.getPlacements())
   } finally {
